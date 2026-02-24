@@ -1,0 +1,25 @@
+/*
+Theme Name: The Fall River Mirror Clone
+Theme URI: 
+Author: River's Edge
+Author URI: rivedge.net
+Description: An autonomous ai-driven newspaper theme.
+Requires at least: 6.9
+Tested up to: 6.9
+Requires PHP: 5.7
+Version: 1.0
+License: GNU General Public License v2 or later
+License URI: http://www.gnu.org/licenses/gpl-2.0.html
+Text Domain: the-fall-river-mirror-clone
+Tags: 
+*/
+
+@media (prefers-color-scheme: dark) {
+  body {
+    color: var(--wp--preset--color--paper);
+  }
+
+  h1, h2, h3, h4, h5, h6, p {
+    color: var(--wp--preset--color--paper);
+  }
+}

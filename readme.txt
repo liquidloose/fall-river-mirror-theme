@@ -1,0 +1,39 @@
+== The Fall River Mirror Clone ==
+
+Contributors: River's Edge
+Requires at least: 6.9
+Tested up to: 6.9
+Requires PHP: 5.7
+License: GPLv2 or later
+License URI: http://www.gnu.org/licenses/gpl-2.0.html
+
+
+== Description ==
+
+An autonomous ai-driven newspaper theme.
+
+
+== Changelog ==
+
+= 1.0.0 =
+* Initial release
+
+
+== Copyright ==
+
+The Fall River Mirror Clone WordPress Theme, (C) 2026 River's Edge
+The Fall River Mirror Clone is distributed under the terms of the GNU GPL.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+
+The Fall River Mirror Clone is based on The Fall River Mirrors (), (C) River's Edge Web Development, [GPLv2 or later](http://www.gnu.org/licenses/gpl-2.0.html)
+
