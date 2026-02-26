@@ -219,7 +219,44 @@ add_action( 'rest_api_init', function () {
       ),
     ),
   ) );
+
+  register_rest_route( 'fr-mirror/v2', '/article-youtube-ids', array(
+    'methods'             => 'GET',
+    'callback'            => 'get_article_youtube_ids_callback',
+    'permission_callback' => '__return_true',
+    'args'                => array(),
+  ) );
 } );
+
+/**
+ * Returns the list of YouTube IDs that already have an article on the site.
+ * Used by FastAPI to sync only articles that do not yet exist on WordPress.
+ *
+ * @return WP_REST_Response Response with { "youtube_ids": [ "id1", "id2", ... ] }
+ */
+function get_article_youtube_ids_callback() {
+  $query = new WP_Query( array(
+    'post_type'      => 'article',
+    'post_status'    => array( 'publish', 'draft' ),
+    'posts_per_page' => -1,
+    'fields'         => 'ids',
+    'meta_query'     => array(
+      array(
+        'key'     => '_article_youtube_id',
+        'value'   => '',
+        'compare' => '!=',
+      ),
+    ),
+  ) );
+  $youtube_ids = array();
+  foreach ( $query->posts as $post_id ) {
+    $yid = get_post_meta( $post_id, '_article_youtube_id', true );
+    if ( ! empty( $yid ) && is_string( $yid ) ) {
+      $youtube_ids[] = $yid;
+    }
+  }
+  return rest_ensure_response( array( 'youtube_ids' => $youtube_ids ) );
+}
 
 /**
  * The callback function for the 'POST /articles' endpoint.
