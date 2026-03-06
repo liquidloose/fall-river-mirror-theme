@@ -14,7 +14,7 @@
  *
  * **URL:** `/wp-json/fr-mirror/v2/create-article`
  * **Method:** POST
- * **Authentication:** Currently open (permission_callback returns true)
+ * **Authentication:** All article REST access (create-article, wp/v2/article list/single) requires JWT or login.
  *
  * ## Required Parameters
  *
@@ -118,6 +118,44 @@
  * @hook rest_api_init
  * @see register_rest_route()
  */
+
+/**
+ * Permission callback: require valid JWT. The JWT plugin validates the Bearer token
+ * (using JWT_AUTH_SECRET_KEY) and sets the current user; we require a logged-in user.
+ */
+function fr_mirror_require_jwt( $request ) {
+  return is_user_logged_in();
+}
+
+/**
+ * Require authentication for core wp/v2/article REST routes (list, single, revisions).
+ * Short-circuits unauthenticated requests with 401. JWT plugin sets user from Bearer token earlier.
+ *
+ * @param mixed            $result  Response to replace the requested version with.
+ * @param WP_REST_Server   $server  Server instance.
+ * @param WP_REST_Request  $request Request used to generate the response.
+ * @return mixed|null WP_Error with 401 if article route and not logged in, else null.
+ */
+function fr_mirror_rest_require_jwt_for_article_routes( $result, $server, $request ) {
+  if ( $result !== null ) {
+    return $result;
+  }
+  $route = $request->get_route();
+  if ( strpos( $route, '/wp/v2/article' ) !== 0 ) {
+    return null;
+  }
+  if ( ! is_user_logged_in() ) {
+    return new WP_Error(
+      'rest_forbidden',
+      __( 'Authentication required to access articles.' ),
+      array( 'status' => 401 )
+    );
+  }
+  return null;
+}
+
+add_filter( 'rest_pre_dispatch', 'fr_mirror_rest_require_jwt_for_article_routes', 10, 3 );
+
 add_action( 'rest_api_init', function () {
   /**
    * Register the article creation endpoint.
@@ -140,7 +178,7 @@ add_action( 'rest_api_init', function () {
   register_rest_route( 'fr-mirror/v2', '/create-article', array(
     'methods' => 'POST',
     'callback' => 'create_article_callback',
-    'permission_callback' => '__return_true',
+    'permission_callback' => 'fr_mirror_require_jwt',
     'args' => array(
       'title' => array(
         'required' => true,
@@ -223,9 +261,46 @@ add_action( 'rest_api_init', function () {
   register_rest_route( 'fr-mirror/v2', '/article-youtube-ids', array(
     'methods'             => 'GET',
     'callback'            => 'get_article_youtube_ids_callback',
-    'permission_callback' => '__return_true',
+    'permission_callback' => 'fr_mirror_require_jwt',
     'args'                => array(),
   ) );
+
+  /**
+   * Update existing article: swap title and content only. Does not delete or change slug.
+   * POST /wp-json/fr-mirror/v2/update-article
+   * Body: { "article_id": int, "youtube_id": string, "title": string, "content": string }
+   */
+  register_rest_route( 'fr-mirror/v2', '/update-article', array(
+    'methods'             => 'POST',
+    'callback'            => 'update_article_callback',
+    'permission_callback' => 'fr_mirror_require_jwt',
+    'args'                => array(
+      'article_id' => array(
+        'required' => false,
+        'type'     => 'integer',
+        'description' => 'App database article ID (optional; lookup is by youtube_id).',
+      ),
+      'youtube_id' => array(
+        'required' => false,
+        'type'     => 'string',
+        'description' => 'YouTube ID; used to find the article post via _article_youtube_id.',
+      ),
+      'title' => array(
+        'required' => false,
+        'type'     => 'string',
+      ),
+      'content' => array(
+        'required' => false,
+        'type'     => 'string',
+      ),
+      'featured_image' => array(
+        'required' => false,
+        'type'     => 'string',
+        'description' => 'Base64-encoded PNG/JPG (data:image/png;base64,... or data:image/jpeg;base64,...) or URL to PNG/JPG. Replaces the post featured image.',
+      ),
+    ),
+  ) );
+
 } );
 
 /**
@@ -256,6 +331,176 @@ function get_article_youtube_ids_callback() {
     }
   }
   return rest_ensure_response( array( 'youtube_ids' => $youtube_ids ) );
+}
+
+/**
+ * Set or replace a post's featured image from a request param (base64 data URL or image URL).
+ * Optionally deletes the existing featured image first (use true when updating).
+ *
+ * @param int    $post_id         Post ID.
+ * @param string $featured_image   Base64 data URL or image URL.
+ * @param bool   $delete_existing If true, delete existing featured image attachment first.
+ * @return true|WP_Error True on success, WP_Error on failure.
+ */
+function fr_mirror_set_post_featured_image_from_param( $post_id, $featured_image, $delete_existing = false ) {
+  if ( $delete_existing ) {
+    $thumbnail_id = get_post_thumbnail_id( $post_id );
+    if ( $thumbnail_id ) {
+      wp_delete_attachment( $thumbnail_id, true );
+    }
+  }
+
+  if ( empty( $featured_image ) ) {
+    return true;
+  }
+
+  if ( preg_match( '/^data:image\/(png|jpeg|jpg);base64,/', $featured_image, $matches ) ) {
+    $image_type = $matches[1];
+    $image_data = preg_replace( '/^data:image\/(png|jpeg|jpg);base64,/', '', $featured_image );
+    $image_data = base64_decode( $image_data );
+    if ( $image_data === false ) {
+      return new WP_Error( 'invalid_image', 'Failed to decode base64 image.', array( 'status' => 400 ) );
+    }
+    $extension = ( $image_type === 'png' ) ? 'png' : 'jpg';
+    $mime_type = ( $image_type === 'png' ) ? 'image/png' : 'image/jpeg';
+    $filename  = 'article-' . $post_id . '-' . time() . '.' . $extension;
+    $upload_dir = wp_upload_dir();
+    $file_path  = $upload_dir['path'] . '/' . $filename;
+    file_put_contents( $file_path, $image_data );
+    $attachment = array(
+      'post_mime_type' => $mime_type,
+      'post_title'     => sanitize_file_name( pathinfo( $filename, PATHINFO_FILENAME ) ),
+      'post_content'   => '',
+      'post_status'    => 'inherit',
+    );
+    $attachment_id = wp_insert_attachment( $attachment, $file_path, $post_id );
+    if ( is_wp_error( $attachment_id ) ) {
+      return $attachment_id;
+    }
+    require_once( ABSPATH . 'wp-admin/includes/image.php' );
+    $attach_data = wp_generate_attachment_metadata( $attachment_id, $file_path );
+    wp_update_attachment_metadata( $attachment_id, $attach_data );
+    set_post_thumbnail( $post_id, $attachment_id );
+    return true;
+  }
+
+  if ( filter_var( $featured_image, FILTER_VALIDATE_URL ) ) {
+    $image_url = esc_url_raw( $featured_image );
+    $response  = wp_remote_get( $image_url );
+    if ( is_wp_error( $response ) || wp_remote_retrieve_response_code( $response ) !== 200 ) {
+      return new WP_Error( 'image_download_failed', 'Failed to download image from URL.', array( 'status' => 400 ) );
+    }
+    $image_data  = wp_remote_retrieve_body( $response );
+    $image_type  = wp_remote_retrieve_header( $response, 'content-type' );
+    $is_png      = ( $image_type === 'image/png' || preg_match( '/\.png$/i', $image_url ) );
+    $is_jpg      = ( $image_type === 'image/jpeg' || $image_type === 'image/jpg' || preg_match( '/\.(jpg|jpeg)$/i', $image_url ) );
+    if ( ! $is_png && ! $is_jpg ) {
+      return new WP_Error( 'unsupported_type', 'Unsupported image type. Expected PNG or JPG.', array( 'status' => 400 ) );
+    }
+    $extension = $is_png ? 'png' : 'jpg';
+    $mime_type = $is_png ? 'image/png' : 'image/jpeg';
+    $filename  = basename( parse_url( $image_url, PHP_URL_PATH ) );
+    if ( empty( $filename ) || ! preg_match( '/\.(png|jpg|jpeg)$/i', $filename ) ) {
+      $filename = 'article-' . $post_id . '-' . time() . '.' . $extension;
+    } else {
+      $filename = preg_replace( '/\.(png|jpg|jpeg)$/i', '.' . $extension, $filename );
+    }
+    $upload_dir = wp_upload_dir();
+    $file_path  = $upload_dir['path'] . '/' . sanitize_file_name( $filename );
+    file_put_contents( $file_path, $image_data );
+    $attachment = array(
+      'post_mime_type' => $mime_type,
+      'post_title'     => sanitize_file_name( pathinfo( $filename, PATHINFO_FILENAME ) ),
+      'post_content'   => '',
+      'post_status'    => 'inherit',
+    );
+    $attachment_id = wp_insert_attachment( $attachment, $file_path, $post_id );
+    if ( is_wp_error( $attachment_id ) ) {
+      return $attachment_id;
+    }
+    require_once( ABSPATH . 'wp-admin/includes/image.php' );
+    $attach_data = wp_generate_attachment_metadata( $attachment_id, $file_path );
+    wp_update_attachment_metadata( $attachment_id, $attach_data );
+    set_post_thumbnail( $post_id, $attachment_id );
+    return true;
+  }
+
+  return new WP_Error( 'invalid_featured_image', 'featured_image must be a base64 data URL or a valid image URL.', array( 'status' => 400 ) );
+}
+
+/**
+ * Update existing article: swap title and content only. Does not delete or change slug.
+ * POST /wp-json/fr-mirror/v2/update-article
+ * Finds article by _article_youtube_id; updates post_title and _article_content.
+ * Optionally accepts featured_image to replace the post's featured image.
+ *
+ * @param WP_REST_Request $request The request object.
+ * @return WP_REST_Response|WP_Error
+ */
+function update_article_callback( WP_REST_Request $request ) {
+  $params = $request->get_json_params();
+  if ( empty( $params ) ) {
+    $params = $request->get_body_params();
+  }
+  $youtube_id     = isset( $params['youtube_id'] ) ? trim( sanitize_text_field( $params['youtube_id'] ) ) : '';
+  $title          = isset( $params['title'] ) ? $params['title'] : '';
+  $content        = isset( $params['content'] ) ? $params['content'] : '';
+  $featured_image = isset( $params['featured_image'] ) ? $params['featured_image'] : '';
+
+  if ( $title === '' && $content === '' && ( $featured_image === '' || $featured_image === null ) ) {
+    return new WP_Error( 'validation_error', 'At least one of title, content, or featured_image is required.', array( 'status' => 400 ) );
+  }
+
+  if ( $youtube_id === '' ) {
+    return new WP_Error( 'validation_error', 'youtube_id is required to find the article.', array( 'status' => 400 ) );
+  }
+
+  $posts = get_posts( array(
+    'post_type'      => 'article',
+    'post_status'    => 'any',
+    'posts_per_page' => 1,
+    'meta_query'     => array(
+      array(
+        'key'     => '_article_youtube_id',
+        'value'   => $youtube_id,
+        'compare' => '=',
+      ),
+    ),
+    'fields' => 'ids',
+  ) );
+
+  if ( empty( $posts ) ) {
+    return new WP_Error( 'not_found', 'No WordPress article found for the given youtube_id.', array( 'status' => 404 ) );
+  }
+
+  $post_id = (int) $posts[0];
+  $update_data = array( 'ID' => $post_id );
+  if ( $title !== '' ) {
+    $update_data['post_title'] = $title;
+  }
+  if ( $content !== '' ) {
+    update_post_meta( $post_id, '_article_content', wp_kses_post( $content ) );
+  }
+
+  if ( ! empty( $update_data['post_title'] ) ) {
+    $updated = wp_update_post( $update_data, true );
+    if ( is_wp_error( $updated ) ) {
+      return $updated;
+    }
+  }
+
+  if ( ! empty( $featured_image ) ) {
+    $featured_result = fr_mirror_set_post_featured_image_from_param( $post_id, $featured_image, true );
+    if ( is_wp_error( $featured_result ) ) {
+      return $featured_result;
+    }
+  }
+
+  return rest_ensure_response( array(
+    'success'  => true,
+    'post_id'  => $post_id,
+    'updated'  => $post_id,
+  ) );
 }
 
 /**
@@ -518,114 +763,9 @@ function create_article_callback( WP_REST_Request $request ) {
   // Handle featured image if provided
   $featured_image = $request->get_param( 'featured_image' );
   if ( ! empty( $featured_image ) ) {
-    $attachment_id = null;
-    
-    // Check if it's a base64 encoded image (PNG or JPG)
-    if ( preg_match( '/^data:image\/(png|jpeg|jpg);base64,/', $featured_image, $matches ) ) {
-      // Extract image type and base64 data
-      $image_type = $matches[1];
-      $image_data = preg_replace( '/^data:image\/(png|jpeg|jpg);base64,/', '', $featured_image );
-      $image_data = base64_decode( $image_data );
-      
-      if ( $image_data !== false ) {
-        // Determine file extension and mime type
-        $extension = ( $image_type === 'png' ) ? 'png' : 'jpg';
-        $mime_type = ( $image_type === 'png' ) ? 'image/png' : 'image/jpeg';
-        
-        // Generate filename
-        $filename = 'article-' . $post_id . '-' . time() . '.' . $extension;
-        $upload_dir = wp_upload_dir();
-        $file_path = $upload_dir['path'] . '/' . $filename;
-        
-        // Save image to uploads directory
-        file_put_contents( $file_path, $image_data );
-        
-        // Prepare attachment data
-        $attachment = array(
-          'post_mime_type' => $mime_type,
-          'post_title'     => sanitize_file_name( pathinfo( $filename, PATHINFO_FILENAME ) ),
-          'post_content'   => '',
-          'post_status'    => 'inherit'
-        );
-        
-        // Insert attachment
-        $attachment_id = wp_insert_attachment( $attachment, $file_path, $post_id );
-        
-        if ( ! is_wp_error( $attachment_id ) ) {
-          // Generate attachment metadata
-          require_once( ABSPATH . 'wp-admin/includes/image.php' );
-          $attach_data = wp_generate_attachment_metadata( $attachment_id, $file_path );
-          wp_update_attachment_metadata( $attachment_id, $attach_data );
-          
-          // Set as featured image
-          set_post_thumbnail( $post_id, $attachment_id );
-        } else {
-          error_log( 'Failed to create attachment: ' . $attachment_id->get_error_message() );
-        }
-      }
-    } elseif ( filter_var( $featured_image, FILTER_VALIDATE_URL ) ) {
-      // It's a URL - download and upload the image
-      $image_url = esc_url_raw( $featured_image );
-      
-      // Download image
-      $response = wp_remote_get( $image_url );
-      
-      if ( ! is_wp_error( $response ) && wp_remote_retrieve_response_code( $response ) === 200 ) {
-        $image_data = wp_remote_retrieve_body( $response );
-        $image_type = wp_remote_retrieve_header( $response, 'content-type' );
-        
-        // Determine if it's PNG or JPG based on content-type or URL extension
-        $is_png = ( $image_type === 'image/png' || preg_match( '/\.png$/i', $image_url ) );
-        $is_jpg = ( $image_type === 'image/jpeg' || $image_type === 'image/jpg' || preg_match( '/\.(jpg|jpeg)$/i', $image_url ) );
-        
-        if ( $is_png || $is_jpg ) {
-          // Determine file extension and mime type
-          $extension = $is_png ? 'png' : 'jpg';
-          $mime_type = $is_png ? 'image/png' : 'image/jpeg';
-          
-          // Generate filename from URL or use default
-          $filename = basename( parse_url( $image_url, PHP_URL_PATH ) );
-          if ( empty( $filename ) || ! preg_match( '/\.(png|jpg|jpeg)$/i', $filename ) ) {
-            $filename = 'article-' . $post_id . '-' . time() . '.' . $extension;
-          } else {
-            // Ensure correct extension
-            $filename = preg_replace( '/\.(png|jpg|jpeg)$/i', '.' . $extension, $filename );
-          }
-          
-          $upload_dir = wp_upload_dir();
-          $file_path = $upload_dir['path'] . '/' . sanitize_file_name( $filename );
-          
-          // Save image
-          file_put_contents( $file_path, $image_data );
-          
-          // Prepare attachment data
-          $attachment = array(
-            'post_mime_type' => $mime_type,
-            'post_title'     => sanitize_file_name( pathinfo( $filename, PATHINFO_FILENAME ) ),
-            'post_content'   => '',
-            'post_status'    => 'inherit'
-          );
-          
-          // Insert attachment
-          $attachment_id = wp_insert_attachment( $attachment, $file_path, $post_id );
-          
-          if ( ! is_wp_error( $attachment_id ) ) {
-            // Generate attachment metadata
-            require_once( ABSPATH . 'wp-admin/includes/image.php' );
-            $attach_data = wp_generate_attachment_metadata( $attachment_id, $file_path );
-            wp_update_attachment_metadata( $attachment_id, $attach_data );
-            
-            // Set as featured image
-            set_post_thumbnail( $post_id, $attachment_id );
-          } else {
-            error_log( 'Failed to create attachment from URL: ' . $attachment_id->get_error_message() );
-          }
-        } else {
-          error_log( 'Unsupported image type from URL. Expected PNG or JPG, got: ' . $image_type );
-        }
-      } else {
-        error_log( 'Failed to download image from URL: ' . $image_url );
-      }
+    $result = fr_mirror_set_post_featured_image_from_param( $post_id, $featured_image, false );
+    if ( is_wp_error( $result ) ) {
+      return $result;
     }
   }
 

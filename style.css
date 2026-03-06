@@ -1,5 +1,5 @@
 /*
-Theme Name: The Fall River Mirror Clone
+Theme Name: Fall River Mirror Theme
 Theme URI: 
 Author: River's Edge
 Author URI: rivedge.net
@@ -19,7 +19,13 @@ Tags:
     color: var(--wp--preset--color--paper);
   }
 
-  h1, h2, h3, h4, h5, h6, p {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  p {
     color: var(--wp--preset--color--paper);
   }
 }
