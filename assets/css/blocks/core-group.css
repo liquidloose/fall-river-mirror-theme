@@ -122,3 +122,31 @@
         text-decoration: underline;
     }
 }
+
+.wp-block-navigation .wp-block-navigation-item__label {
+    word-break: normal;
+}
+
+span.wp-block-navigation-item__label {
+    padding: 0px 7px;
+}
+
+span.wp-block-navigation-item__label:hover {
+    padding: 0px 8px;
+}
+
+footer p {
+    padding-bottom: 0px !important;
+}
+
+span.wp-block-navigation-item__label {
+    height: 36px !important;
+}
+
+span.wp-block-navigation-item__label:hover {
+    height: 36px !important;
+}
+
+.wp-block-search__inside-wrapper {
+    height: 55px;
+}
