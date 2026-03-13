@@ -1,0 +1,3 @@
+[submodule "plugins/to-tha-top"]
+	path = plugins/to-tha-top
+	url = https://github.com/liquidloose/to-tha-top.git
