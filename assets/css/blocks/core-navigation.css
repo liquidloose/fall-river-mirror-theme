@@ -81,3 +81,27 @@ li.has-small-font-size.wp-block-navigation-item.has-child.open-on-hover-click.fr
 li.has-small-font-size.wp-block-navigation-item.has-child.open-on-hover-click.fr-mirror-articles-nav.wp-block-navigation-submenu.has-roboto-mono-font-family:hover {
     cursor: grab;
 }
+
+@media(max-width: 700px) {
+    nav {
+        padding-left: 20px;
+    }
+
+    .wp-block-navigation.no-wrap {
+        --navigation-layout-wrap: wrap;
+    }
+}
+
+button.wp-block-navigation__responsive-container-close {
+    color: #000000;
+}
+
+
+.rlussier-dark-mode button.wp-block-navigation__responsive-container-close {
+    color: #ffffff;
+}
+
+
+button.wp-block-navigation__responsive-container-close {
+    color: #000000;
+}

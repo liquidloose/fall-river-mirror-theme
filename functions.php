@@ -12,9 +12,6 @@ require_once get_template_directory() . '/includes/article-content-template.php'
 // Include block styles
 require_once get_template_directory() . '/includes/block-styles.php';
 
-// Include query loop variations
-require_once get_template_directory() . '/includes/query_loop_filtered_by_meeting_date.php';
-
 // Include block bindings
 require_once get_template_directory() . '/includes/block-bindings.php';
 
@@ -106,7 +103,31 @@ function the_fall_river_mirror_clone_enqueue_block_editor_assets() {
         wp_get_theme()->get('Version'),
         true
     );
-    
+
+    wp_enqueue_script(
+        'query-loop-view-count-variation',
+        get_template_directory_uri() . '/js/query-loop-view-count-variation.js',
+        array(
+            'wp-blocks',
+            'wp-hooks',
+            'wp-i18n',
+        ),
+        wp_get_theme()->get('Version'),
+        true
+    );
+
+    wp_enqueue_script(
+        'query-loop-meeting-date-variation',
+        get_template_directory_uri() . '/js/query-loop-meeting-date-variation.js',
+        array(
+            'wp-blocks',
+            'wp-hooks',
+            'wp-i18n',
+        ),
+        wp_get_theme()->get('Version'),
+        true
+    );
+
     wp_enqueue_script(
         'paragraph-view-count-variation',
         get_template_directory_uri() . '/js/paragraph-view-count-variation.js',
@@ -233,6 +254,242 @@ function the_fall_river_mirror_clone_enqueue_block_editor_assets() {
     );
 }
 add_action( 'enqueue_block_editor_assets', 'the_fall_river_mirror_clone_enqueue_block_editor_assets' );
+
+/**
+ * Set posts per page for category archive pages.
+ *
+ * @hook pre_get_posts
+ */
+add_action( 'pre_get_posts', function( $query ) {
+    if ( ! is_admin() && $query->is_main_query() && $query->is_category() ) {
+        $query->set( 'posts_per_page', 15 );
+    }
+} );
+
+/**
+ * Register __frmCustomFieldFilter on core/query:
+ * - as a saved attribute (so WordPress doesn't strip it on save)
+ * - in providesContext (so it flows down to child blocks)
+ *
+ * @hook register_block_type_args
+ */
+add_filter( 'register_block_type_args', function( $args, $block_type ) {
+    if ( 'core/query' === $block_type ) {
+        $args['attributes']['namespace'] = array(
+            'type'    => 'string',
+            'default' => '',
+        );
+        $args['attributes']['__frmCustomFieldFilter'] = array(
+            'type'    => 'string',
+            'default' => '',
+        );
+        if ( ! isset( $args['providesContext'] ) ) {
+            $args['providesContext'] = array();
+        }
+        $args['providesContext']['__frmCustomFieldFilter'] = '__frmCustomFieldFilter';
+    }
+
+    // Add __frmCustomFieldFilter to core/post-template's usesContext so it
+    // receives the value from the parent Query block via context.
+    if ( 'core/post-template' === $block_type ) {
+        if ( ! isset( $args['usesContext'] ) ) {
+            $args['usesContext'] = array();
+        }
+        if ( ! in_array( '__frmCustomFieldFilter', $args['usesContext'], true ) ) {
+            $args['usesContext'][] = '__frmCustomFieldFilter';
+        }
+    }
+
+    return $args;
+}, 10, 2 );
+
+/**
+ * Fallback: push __frmCustomFieldFilter into block context at render time.
+ *
+ * providesContext/usesContext handles the normal path, but this catches
+ * edge cases where the context hasn't propagated (e.g. cached blocks).
+ *
+ * @hook render_block_context
+ */
+add_filter( 'render_block_context', function( $context, $parsed_block, $parent_block ) {
+    if (
+        $parent_block &&
+        isset( $parent_block->block_type->name ) &&
+        'core/query' === $parent_block->block_type->name
+    ) {
+        $value = $parent_block->attributes['__frmCustomFieldFilter'] ?? '';
+        if ( $value ) {
+            $context['__frmCustomFieldFilter'] = $value;
+        }
+    }
+    return $context;
+}, 10, 3 );
+
+/**
+ * Sort article Query Loop blocks by the correct meta field based on variation.
+ *
+ * - fr-mirror/query-view-count: sort by _article_view_count (numeric)
+ * - fr-mirror/query-meeting-date: sort by _article_meeting_date
+ * - Legacy article query blocks (no variation marker): fallback to meeting date
+ *
+ * The block editor's ASC/DESC toggle still works — only the sort field changes.
+ *
+ * @hook query_loop_block_query_vars
+ */
+add_filter( 'query_loop_block_query_vars', function( $query, $block ) {
+    if ( ( $query['post_type'] ?? '' ) !== 'article' ) {
+        return $query;
+    }
+
+    $variation_namespace = $block->attributes['namespace'] ?? '';
+    $custom_filter = $block->context['__frmCustomFieldFilter']
+        ?? $block->attributes['__frmCustomFieldFilter']
+        ?? '';
+
+    $is_view_count_variation = (
+        $variation_namespace === 'fr-mirror/query-view-count' ||
+        $custom_filter === '_article_view_count'
+    );
+    $is_meeting_date_variation = (
+        $variation_namespace === 'fr-mirror/query-meeting-date' ||
+        in_array( $custom_filter, array( '_article_meeting_date', 'meeting_date' ), true )
+    );
+    $is_legacy_article_query = ( ! $variation_namespace && ! $custom_filter );
+
+    // Backward compatibility: old article query blocks without variation markers
+    // still sort by meeting date.
+    if ( ! $is_view_count_variation && ! $is_meeting_date_variation && ! $is_legacy_article_query ) {
+        return $query;
+    }
+
+    if ( $is_view_count_variation ) {
+        // No meta_query EXISTS — articles without a view count still show,
+        // sorted last (MySQL treats NULL as lowest in DESC order).
+        $query['meta_key'] = '_article_view_count';
+        $query['orderby']  = 'meta_value_num';
+    } else {
+        $query['meta_key']   = '_article_meeting_date';
+        $query['orderby']    = 'meta_value';
+        $query['meta_query'] = array(
+            array(
+                'key'     => '_article_meeting_date',
+                'compare' => 'EXISTS',
+            ),
+        );
+    }
+
+    if ( empty( $query['order'] ) ) {
+        $query['order'] = 'DESC';
+    }
+
+    return $query;
+}, 10, 2 );
+
+/**
+ * Register __frmCustomFieldFilter as a valid REST collection param for articles.
+ *
+ * Without this WordPress strips the param before it reaches rest_article_query,
+ * so the editor preview can't apply custom sorting.
+ *
+ * @hook rest_article_collection_params
+ */
+add_filter( 'rest_article_collection_params', function( $params ) {
+    $params['namespace'] = array(
+        'description'       => 'Block variation namespace for Query Loop preview parity.',
+        'type'              => 'string',
+        'default'           => '',
+        'sanitize_callback' => 'sanitize_text_field',
+    );
+    $params['__frmCustomFieldFilter'] = array(
+        'description'       => 'Custom field filter for Query Loop sorting variations.',
+        'type'              => 'string',
+        'default'           => '',
+        'sanitize_callback' => 'sanitize_text_field',
+    );
+
+    // Some editor requests nest custom keys under the REST `filter` object; allow them
+    // in the schema so they are not stripped before rest_article_query runs.
+    if ( isset( $params['filter'] ) && is_array( $params['filter'] ) ) {
+        if ( ! isset( $params['filter']['properties'] ) || ! is_array( $params['filter']['properties'] ) ) {
+            $params['filter']['properties'] = array();
+        }
+        $params['filter']['properties']['namespace']              = array(
+            'type'              => 'string',
+            'sanitize_callback' => 'sanitize_text_field',
+        );
+        $params['filter']['properties']['__frmCustomFieldFilter'] = array(
+            'type'              => 'string',
+            'sanitize_callback' => 'sanitize_text_field',
+        );
+    }
+
+    return $params;
+} );
+
+/**
+ * Apply custom field sorting in the editor via REST API.
+ *
+ * Only runs when the request explicitly includes variation markers
+ * (`namespace` and/or `__frmCustomFieldFilter`). Do not treat “no params”
+ * as legacy meeting-date here: generic /wp/v2/article fetches (sidebar,
+ * multiple Query blocks, other UI) would all get the same sort and look
+ * “stuck” on one mode. Legacy article loops without markers still use
+ * meeting-date on the frontend via query_loop_block_query_vars.
+ *
+ * Reads markers from top-level query args and from the REST `filter` object
+ * (some block-editor requests nest attributes there).
+ *
+ * @hook rest_article_query
+ */
+add_filter( 'rest_article_query', function( $args, $request ) {
+    $filter_params = $request->get_param( 'filter' );
+    if ( ! is_array( $filter_params ) ) {
+        $filter_params = array();
+    }
+
+    $variation_namespace = $request->get_param( 'namespace' );
+    if ( $variation_namespace === null || $variation_namespace === '' ) {
+        $variation_namespace = isset( $filter_params['namespace'] )
+            ? sanitize_text_field( (string) $filter_params['namespace'] )
+            : '';
+    } else {
+        $variation_namespace = sanitize_text_field( (string) $variation_namespace );
+    }
+
+    $custom_filter = $request->get_param( '__frmCustomFieldFilter' );
+    if ( $custom_filter === null || $custom_filter === '' ) {
+        $custom_filter = isset( $filter_params['__frmCustomFieldFilter'] )
+            ? sanitize_text_field( (string) $filter_params['__frmCustomFieldFilter'] )
+            : '';
+    } else {
+        $custom_filter = sanitize_text_field( (string) $custom_filter );
+    }
+
+    $is_view_count_variation = (
+        $variation_namespace === 'fr-mirror/query-view-count' ||
+        $custom_filter === '_article_view_count'
+    );
+    $is_meeting_date_variation = (
+        $variation_namespace === 'fr-mirror/query-meeting-date' ||
+        in_array( $custom_filter, array( 'meeting_date', '_article_meeting_date' ), true )
+    );
+
+    if ( $is_view_count_variation ) {
+        $args['meta_key'] = '_article_view_count';
+        $args['orderby']  = 'meta_value_num';
+        if ( empty( $args['order'] ) ) {
+            $args['order'] = 'DESC';
+        }
+    } elseif ( $is_meeting_date_variation ) {
+        $args['meta_key'] = '_article_meeting_date';
+        $args['orderby']  = 'meta_value';
+        if ( empty( $args['order'] ) ) {
+            $args['order'] = 'DESC';
+        }
+    }
+
+    return $args;
+}, 10, 2 );
 
 /**
  * Register Post ID Block with PHP render callback

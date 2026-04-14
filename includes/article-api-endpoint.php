@@ -129,32 +129,35 @@ function fr_mirror_require_jwt( $request ) {
 
 /**
  * Require authentication for core wp/v2/article REST routes (list, single, revisions).
- * Short-circuits unauthenticated requests with 401. JWT plugin sets user from Bearer token earlier.
  *
- * @param mixed            $result  Response to replace the requested version with.
- * @param WP_REST_Server   $server  Server instance.
- * @param WP_REST_Request  $request Request used to generate the response.
- * @return mixed|null WP_Error with 401 if article route and not logged in, else null.
+ * Uses rest_request_before_callbacks which fires after routing AND authentication
+ * are fully resolved — so is_user_logged_in() is accurate regardless of whether
+ * auth came from cookie/nonce or JWT Bearer token.
+ *
+ * @param WP_REST_Response|WP_Error|null $response
+ * @param array                          $handler
+ * @param WP_REST_Request                $request
+ * @return WP_REST_Response|WP_Error|null
  */
-function fr_mirror_rest_require_jwt_for_article_routes( $result, $server, $request ) {
-  if ( $result !== null ) {
-    return $result;
+function fr_mirror_rest_require_auth_for_article_routes( $response, $handler, $request ) {
+  if ( strpos( $request->get_route(), '/wp/v2/article' ) !== 0 ) {
+    return $response;
   }
-  $route = $request->get_route();
-  if ( strpos( $route, '/wp/v2/article' ) !== 0 ) {
-    return null;
-  }
-  if ( ! is_user_logged_in() ) {
-    return new WP_Error(
-      'rest_forbidden',
-      __( 'Authentication required to access articles.' ),
-      array( 'status' => 401 )
-    );
-  }
-  return null;
-}
 
-add_filter( 'rest_pre_dispatch', 'fr_mirror_rest_require_jwt_for_article_routes', 10, 3 );
+  // is_user_logged_in() can return false when a JWT plugin overrides cookie auth
+  // for requests without a Bearer token. Validate the auth cookie directly as a
+  // fallback so block editor requests (which use cookies, not JWT) are allowed.
+  if ( is_user_logged_in() || wp_validate_auth_cookie( '', 'logged_in' ) ) {
+    return $response;
+  }
+
+  return new WP_Error(
+    'rest_forbidden',
+    __( 'Authentication required to access articles.' ),
+    array( 'status' => 401 )
+  );
+}
+add_filter( 'rest_request_before_callbacks', 'fr_mirror_rest_require_auth_for_article_routes', 10, 3 );
 
 add_action( 'rest_api_init', function () {
   /**
