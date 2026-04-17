@@ -110,8 +110,10 @@ if (!function_exists('sort_category_archives_by_meeting_date')) {
         }
         
         // Check if we're on a category archive page and querying articles
-        if (is_category() && $query->get('post_type') === 'article' || 
-            (is_array($query->get('post_type')) && in_array('article', $query->get('post_type')))) {
+        if (is_category() && (
+            $query->get('post_type') === 'article' ||
+            (is_array($query->get('post_type')) && in_array('article', $query->get('post_type')))
+        )) {
             
             // Sort by meeting_date meta field
             $query->set('meta_key', '_article_meeting_date');
@@ -124,40 +126,6 @@ if (!function_exists('sort_category_archives_by_meeting_date')) {
     }
     }
     add_action('pre_get_posts', 'sort_category_archives_by_meeting_date', 10);
-
-/**
- * Modify Query Block Query Vars to Sort by Meeting Date
- * 
- * This specifically targets Query blocks and modifies their query
- * to sort Articles by meeting_date meta field in category archives.
- * 
- * @hook query_loop_block_query_vars
- * @param array $query Array of query variables.
- * @param WP_Block $block Block instance.
- * @return array Modified query variables
- */
-if (!function_exists('sort_query_block_by_meeting_date')) {
-function sort_query_block_by_meeting_date($query, $block) {
-    // Only modify queries for Article post type
-    $post_type = $query['post_type'] ?? '';
-    
-    if ($post_type === 'article' || (is_array($post_type) && in_array('article', $post_type))) {
-        // Check if we're on a category archive page
-        if (is_category()) {
-            // Override orderby to sort by _article_meeting_date meta field
-            $query['meta_key'] = '_article_meeting_date';
-            $query['meta_query'] = array(
-                array( 'key' => '_article_meeting_date', 'compare' => 'EXISTS' ),
-            );
-            $query['orderby'] = 'meta_value';
-            $query['order'] = 'DESC';
-        }
-    }
-    
-    return $query;
-}
-}
-add_filter('query_loop_block_query_vars', 'sort_query_block_by_meeting_date', 10, 2);
 
 // ============================================================================
 // REST API REGISTRATION

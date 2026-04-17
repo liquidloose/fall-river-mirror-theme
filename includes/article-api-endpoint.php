@@ -129,32 +129,35 @@ function fr_mirror_require_jwt( $request ) {
 
 /**
  * Require authentication for core wp/v2/article REST routes (list, single, revisions).
- * Short-circuits unauthenticated requests with 401. JWT plugin sets user from Bearer token earlier.
  *
- * @param mixed            $result  Response to replace the requested version with.
- * @param WP_REST_Server   $server  Server instance.
- * @param WP_REST_Request  $request Request used to generate the response.
- * @return mixed|null WP_Error with 401 if article route and not logged in, else null.
+ * Uses rest_request_before_callbacks which fires after routing AND authentication
+ * are fully resolved — so is_user_logged_in() is accurate regardless of whether
+ * auth came from cookie/nonce or JWT Bearer token.
+ *
+ * @param WP_REST_Response|WP_Error|null $response
+ * @param array                          $handler
+ * @param WP_REST_Request                $request
+ * @return WP_REST_Response|WP_Error|null
  */
-function fr_mirror_rest_require_jwt_for_article_routes( $result, $server, $request ) {
-  if ( $result !== null ) {
-    return $result;
+function fr_mirror_rest_require_auth_for_article_routes( $response, $handler, $request ) {
+  if ( strpos( $request->get_route(), '/wp/v2/article' ) !== 0 ) {
+    return $response;
   }
-  $route = $request->get_route();
-  if ( strpos( $route, '/wp/v2/article' ) !== 0 ) {
-    return null;
-  }
-  if ( ! is_user_logged_in() ) {
-    return new WP_Error(
-      'rest_forbidden',
-      __( 'Authentication required to access articles.' ),
-      array( 'status' => 401 )
-    );
-  }
-  return null;
-}
 
-add_filter( 'rest_pre_dispatch', 'fr_mirror_rest_require_jwt_for_article_routes', 10, 3 );
+  // is_user_logged_in() can return false when a JWT plugin overrides cookie auth
+  // for requests without a Bearer token. Validate the auth cookie directly as a
+  // fallback so block editor requests (which use cookies, not JWT) are allowed.
+  if ( is_user_logged_in() || wp_validate_auth_cookie( '', 'logged_in' ) ) {
+    return $response;
+  }
+
+  return new WP_Error(
+    'rest_forbidden',
+    __( 'Authentication required to access articles.' ),
+    array( 'status' => 401 )
+  );
+}
+add_filter( 'rest_request_before_callbacks', 'fr_mirror_rest_require_auth_for_article_routes', 10, 3 );
 
 add_action( 'rest_api_init', function () {
   /**
@@ -431,7 +434,7 @@ function fr_mirror_set_post_featured_image_from_param( $post_id, $featured_image
 /**
  * Update existing article: swap title and content only. Does not delete or change slug.
  * POST /wp-json/fr-mirror/v2/update-article
- * Finds article by _article_youtube_id; updates post_title and _article_content.
+ * Finds article by _article_youtube_id; updates post_title and post_content.
  * Optionally accepts featured_image to replace the post's featured image.
  *
  * @param WP_REST_Request $request The request object.
@@ -479,7 +482,7 @@ function update_article_callback( WP_REST_Request $request ) {
     $update_data['post_title'] = $title;
   }
   if ( $content !== '' ) {
-    update_post_meta( $post_id, '_article_content', wp_kses_post( $content ) );
+    $update_data['post_content'] = fr_mirror_get_required_article_blocks( '', $content );
   }
 
   if ( ! empty( $update_data['post_title'] ) ) {
@@ -551,10 +554,10 @@ function create_article_callback( WP_REST_Request $request ) {
   }
 
   // Prepare the post data for insertion.
-  // Note: article_content maps to _article_content custom field, not post_content
+  // Store editable body content in post_content and keep _article_content as legacy/meta storage.
   $post_data = array(
     'post_title'    => $title,
-    'post_content'  => fr_mirror_get_required_article_blocks( $title ), // Include title in heading block
+    'post_content'  => fr_mirror_get_required_article_blocks( '', $article_content ),
     'post_type'     => 'article',
     'post_status'   => $status,
     'post_author'   => get_current_user_id(),

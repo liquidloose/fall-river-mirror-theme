@@ -24,14 +24,12 @@
 
 (function () {
     // Import WordPress editor components needed for the UI
-    const { select } = wp.data;
     const { addFilter } = wp.hooks;
     const { InspectorControls } = wp.blockEditor;
-    const { PanelBody, SelectControl, TextControl } = wp.components;
+    const { PanelBody, SelectControl } = wp.components;
     const { useSelect } = wp.data;
-    const { createElement: el, useEffect } = wp.element;
+    const { createElement: el } = wp.element;
     const { __ } = wp.i18n;
-    const { apiFetch } = wp;
     
     /**
      * STEP 1: REGISTER BLOCK EDITOR FILTER
@@ -101,42 +99,6 @@
                 }
                 
                 /**
-                 * STEP 5A: GET POST ID AND META
-                 * 
-                 * Fetch the post ID and current meta values so we can display
-                 * the actual content in the editor.
-                 */
-                const postId = useSelect(function(select) {
-                    return select('core/editor').getCurrentPostId();
-                }, []);
-                
-                const meta = useSelect(function(select) {
-                    return select('core/editor').getEditedPostAttribute('meta');
-                }, []);
-                
-                /**
-                 * STEP 5B: UPDATE WHEN META CHANGES
-                 * 
-                 * WordPress automatically resolves block bindings via PHP registration.
-                 * We just need to update the block content when meta changes in the sidebar.
-                 */
-                useEffect(function() {
-                    if (!isBound || !fieldKey || !meta) {
-                        return;
-                    }
-                    
-                    const metaKey = fieldKey;
-                    const value = meta[metaKey] || '';
-                    
-                    // Update block content when meta changes
-                    if (props.attributes.content !== value) {
-                        props.setAttributes({
-                            content: value
-                        });
-                    }
-                }, [meta, isBound, fieldKey]);
-                
-                /**
                  * STEP 6: RENDER BLOCK WITH BINDING UI
                  * 
                  * Returns the original block editor component plus our custom panel
@@ -173,7 +135,6 @@
                                 }
                             }, el('strong', {}, __('Currently bound to: ', 'fr-mirror')), 
                                 el('span', {}, 
-                                    fieldKey === '_article_content' ? __('Content', 'fr-mirror') :
                                     fieldKey === '_article_committee' ? __('Committee', 'fr-mirror') :
                                     fieldKey === '_article_youtube_id' ? __('YouTube ID', 'fr-mirror') :
                                     fieldKey === '_article_bullet_points' ? __('Bullet Points', 'fr-mirror') :
@@ -194,7 +155,6 @@
                                 value: isBound ? contentBinding?.args?.key || '' : '',
                                 options: [
                                     { label: __('None', 'fr-mirror'), value: '' },
-                                    { label: __('Article Content', 'fr-mirror'), value: '_article_content' },
                                     { label: __('Committee', 'fr-mirror'), value: '_article_committee' },
                                     { label: __('YouTube ID', 'fr-mirror'), value: '_article_youtube_id' },
                                     { label: __('Bullet Points', 'fr-mirror'), value: '_article_bullet_points' },
@@ -227,7 +187,7 @@
                                          * User selected a meta field. We:
                                          * 1. Create binding configuration in block metadata
                                          * 2. Store the source ('fr-mirror/article-meta') and key (field name)
-                                         * 3. Actual content will be fetched and displayed by useEffect hooks above
+                                         * 3. WordPress resolves the binding value at render time
                                          */
                                         const newBinding = {
                                             source: 'fr-mirror/article-meta',

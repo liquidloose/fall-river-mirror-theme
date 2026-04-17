@@ -1,91 +1,93 @@
 <?php
 
 /**
- * Generate the required blocks with bindings for article post_content
- * 
- * @param string $title Optional. The post title to include in the heading block. If not provided, uses empty heading.
- * @return string The block-formatted content with bindings
+ * Build editable post_content blocks from legacy article HTML content.
+ *
+ * If incoming content already contains Gutenberg blocks, return it as-is.
+ * Otherwise wrap sanitized HTML in a core/html block so editors can update
+ * content in the canvas without depending on block bindings.
+ *
+ * @param string $article_content Legacy article body content.
+ * @return string
  */
-function fr_mirror_get_required_article_blocks( $title = '' ) {
-    // Escape the title for use in HTML
-    $title_html = $title ? esc_html( $title ) : '';
-    
-    return "<!-- wp:heading -->
-<h2 class=\"wp-block-heading\">{$title_html}</h2>
-<!-- /wp:heading -->
+function fr_mirror_get_required_article_blocks( $title = '', $article_content = '' ) {
+    $legacy_content = trim( (string) $article_content );
 
-<!-- wp:paragraph {\"metadata\":{\"bindings\":{\"content\":{\"source\":\"fr-mirror/article-meta\",\"args\":{\"key\":\"_article_bullet_points\"}}}}} -->
-<p></p>
-<!-- /wp:paragraph -->
+    if ( $legacy_content === '' ) {
+        return "<!-- wp:paragraph -->\n<p></p>\n<!-- /wp:paragraph -->";
+    }
 
-<!-- wp:paragraph {\"metadata\":{\"bindings\":{\"content\":{\"source\":\"fr-mirror/article-meta\",\"args\":{\"key\":\"_article_content\"}}}}} -->
-<p></p>
-<!-- /wp:paragraph -->
+    $sanitized_content = wp_kses_post( $legacy_content );
 
-<!-- wp:paragraph {\"metadata\":{\"bindings\":{\"content\":{\"source\":\"fr-mirror/article-meta\",\"args\":{\"key\":\"_article_content\"}}}}} -->
-<p></p>
-<!-- /wp:paragraph -->";
+    if ( function_exists( 'has_blocks' ) && has_blocks( $sanitized_content ) ) {
+        return $sanitized_content;
+    }
+
+    return "<!-- wp:html -->\n{$sanitized_content}\n<!-- /wp:html -->";
 }
-
 
 /**
- * Fix existing articles to ensure they have required blocks
- * Run this once via WP-CLI: wp eval "fr_mirror_fix_existing_article_blocks();"
- * Or call it from a temporary admin page/endpoint
- * 
- * @return int Number of posts fixed
+ * Backfill legacy _article_content values into editable post_content blocks.
+ *
+ * Updates only posts that still have empty content or the old article-meta
+ * binding scaffold, preserving manually edited post_content.
+ *
+ * @return array{updated:int, skipped:int}
  */
-function fr_mirror_fix_existing_article_blocks() {
+function fr_mirror_backfill_article_post_content_from_meta() {
     $articles = get_posts( array(
-        'post_type' => 'article',
+        'post_type'      => 'article',
         'posts_per_page' => -1,
-        'post_status' => 'any',
+        'post_status'    => array( 'publish', 'draft', 'pending', 'private', 'future' ),
     ) );
-    
-    $fixed = 0;
+
+    $updated = 0;
+    $skipped = 0;
+
     foreach ( $articles as $article ) {
-        $current_content = $article->post_content;
-        
-        // Check if required blocks are missing (heading block or article-meta bindings)
-        $has_heading_block = strpos( $current_content, 'wp:heading' ) !== false;
-        $has_article_meta = strpos( $current_content, 'fr-mirror/article-meta' ) !== false;
-        
-        // Update if content is empty or missing any required blocks
-        if ( empty( $current_content ) || ! $has_heading_block || ! $has_article_meta ) {
-            
-            wp_update_post( array(
-                'ID' => $article->ID,
-                'post_content' => fr_mirror_get_required_article_blocks( $article->post_title ),
-            ) );
-            
-            $fixed++;
+        $current_content    = (string) $article->post_content;
+        $legacy_meta_value  = (string) get_post_meta( $article->ID, '_article_content', true );
+        $is_empty_content   = trim( $current_content ) === '';
+        $has_legacy_binding = (
+            strpos( $current_content, 'fr-mirror/article-meta' ) !== false &&
+            strpos( $current_content, '_article_content' ) !== false
+        );
+        $needs_content_seed   = ( $legacy_meta_value !== '' && ( $is_empty_content || $has_legacy_binding ) );
+
+        if ( ! $needs_content_seed ) {
+            $skipped++;
+            continue;
         }
+
+        $new_content = fr_mirror_get_required_article_blocks( '', $legacy_meta_value );
+        $result      = wp_update_post(
+            array(
+                'ID'           => $article->ID,
+                'post_content' => $new_content,
+            ),
+            true
+        );
+
+        if ( is_wp_error( $result ) ) {
+            $skipped++;
+            continue;
+        }
+
+        $updated++;
     }
-    
-    return $fixed;
+
+    return array(
+        'updated' => $updated,
+        'skipped' => $skipped,
+    );
 }
 
-// Temporary endpoint to fix existing articles - REMOVE AFTER USE
-add_action( 'rest_api_init', function() {
-    register_rest_route( 'fr-mirror/v2', '/fix-article-blocks', array(
-        'methods' => 'POST',
-        'callback' => function() {
-            $fixed = fr_mirror_fix_existing_article_blocks();
-            return new WP_REST_Response( array(
-                'message' => "Fixed $fixed articles",
-                'fixed_count' => $fixed
-            ), 200 );
-        },
-        'permission_callback' => '__return_true',
-    ) );
-} );
-
-// TEMPORARY: Fix existing articles - REMOVE AFTER RUNNING
-add_action( 'admin_init', function() {
-    // Only run once - check if option exists
-    if ( ! get_option( 'fr_mirror_blocks_with_title_fixed' ) ) {
-        $fixed = fr_mirror_fix_existing_article_blocks();
-        update_option( 'fr_mirror_blocks_with_title_fixed', true );
-        error_log( "Fixed $fixed article posts with required blocks including title" );
-    }
-} );
+/**
+ * Manual migration entrypoint for backfill.
+ *
+ * Intentionally not auto-run on admin requests to avoid blocking wp-admin screens
+ * on sites with large article counts.
+ *
+ * Usage (WP-CLI):
+ * wp eval 'print_r( fr_mirror_backfill_article_post_content_from_meta() );'
+ */
