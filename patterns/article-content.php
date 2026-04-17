@@ -6,6 +6,6 @@
  */
 
 ?>
-<!-- wp:paragraph {"metadata":{"bindings":{"content":{"source":"fr-mirror/article-meta","args":{"key":"article_content"}}}}} -->
+<!-- wp:paragraph -->
 <p></p>
 <!-- /wp:paragraph -->

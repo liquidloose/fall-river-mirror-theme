@@ -105,3 +105,18 @@ button.wp-block-navigation__responsive-container-close {
 button.wp-block-navigation__responsive-container-close {
     color: #000000;
 }
+
+.fr-mirror-bullet-points ul {
+    margin-left: -30px !important;
+}
+
+@media(max-width: 1150px) {
+    .fr-mirror-main-feed .wp-block-columns {
+        display: flex;
+        flex-direction: column;
+    }
+    .wp-block-query .wp-block-columns {
+        display: flex;
+        flex-direction: column;
+    }
+}

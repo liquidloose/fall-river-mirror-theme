@@ -434,7 +434,7 @@ function fr_mirror_set_post_featured_image_from_param( $post_id, $featured_image
 /**
  * Update existing article: swap title and content only. Does not delete or change slug.
  * POST /wp-json/fr-mirror/v2/update-article
- * Finds article by _article_youtube_id; updates post_title and _article_content.
+ * Finds article by _article_youtube_id; updates post_title and post_content.
  * Optionally accepts featured_image to replace the post's featured image.
  *
  * @param WP_REST_Request $request The request object.
@@ -482,7 +482,7 @@ function update_article_callback( WP_REST_Request $request ) {
     $update_data['post_title'] = $title;
   }
   if ( $content !== '' ) {
-    update_post_meta( $post_id, '_article_content', wp_kses_post( $content ) );
+    $update_data['post_content'] = fr_mirror_get_required_article_blocks( '', $content );
   }
 
   if ( ! empty( $update_data['post_title'] ) ) {
@@ -554,10 +554,10 @@ function create_article_callback( WP_REST_Request $request ) {
   }
 
   // Prepare the post data for insertion.
-  // Note: article_content maps to _article_content custom field, not post_content
+  // Store editable body content in post_content and keep _article_content as legacy/meta storage.
   $post_data = array(
     'post_title'    => $title,
-    'post_content'  => fr_mirror_get_required_article_blocks( $title ), // Include title in heading block
+    'post_content'  => fr_mirror_get_required_article_blocks( '', $article_content ),
     'post_type'     => 'article',
     'post_status'   => $status,
     'post_author'   => get_current_user_id(),
