@@ -244,3 +244,7 @@ a.cmswt-IndexSwitcher-link {
 .ais-HierarchicalMenu-showMore, .ais-Menu-showMore, .ais-RefinementList-showMore {
     margin-top: 1.5rem !important;
 }
+
+select.ais-SortBy-select {
+    display: none !important;
+}
