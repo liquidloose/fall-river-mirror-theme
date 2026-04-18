@@ -16,6 +16,54 @@ require_once get_template_directory() . '/includes/block-styles.php';
 require_once get_template_directory() . '/includes/block-bindings.php';
 
 /**
+ * Expose the article post type to CM Typesense index type configuration.
+ *
+ * @param array $available_post_types Post type configs keyed by slug (label/value pairs).
+ * @return array
+ */
+if ( ! function_exists( 'cm_typesense_add_available_post_types' ) ) {
+    function cm_typesense_add_available_post_types( $available_post_types ) {
+        $available_post_types['article'] = array(
+            'label' => 'Article',
+            'value' => 'article',
+        );
+
+        return $available_post_types;
+    }
+}
+add_filter( 'cm_typesense_available_index_types', 'cm_typesense_add_available_post_types' );
+
+/**
+ * Use Search Configuration "enabled post types" for the hijacked instant-search popup.
+ *
+ * The popup is built from the Customizer option typesense_customizer_instant_search; if that
+ * value is missing or never published, Codemanas Search with Typesense falls back to post
+ * only (see Frontend::load_popup). Autocomplete already follows enabled_post_types — this
+ * keeps the popup in sync so article (and anything else enabled) is actually searched.
+ *
+ * @param array $options Parsed typesense_customizer_instant_search + defaults.
+ * @return array
+ */
+if ( ! function_exists( 'cm_typesense_sync_popup_enabled_post_types' ) ) {
+	function cm_typesense_sync_popup_enabled_post_types( $options ) {
+		if ( ! is_array( $options ) || ! class_exists( '\Codemanas\Typesense\Backend\Admin' ) ) {
+			return $options;
+		}
+		$config = \Codemanas\Typesense\Backend\Admin::get_search_config_settings();
+		if ( empty( $config['enabled_post_types'] ) || ! is_array( $config['enabled_post_types'] ) ) {
+			return $options;
+		}
+		$slugs = array_values( array_unique( array_map( 'sanitize_key', $config['enabled_post_types'] ) ) );
+		if ( $slugs === array() ) {
+			return $options;
+		}
+		$options['available_post_types'] = implode( ',', $slugs );
+		return $options;
+	}
+}
+add_filter( 'cm_typesense_popup_shortcode_params', 'cm_typesense_sync_popup_enabled_post_types', 5 );
+
+/**
  * Enqueue Gutenberg editor scripts for custom meta panels
  * 
  * This loads the JavaScript file that adds custom meta field panels

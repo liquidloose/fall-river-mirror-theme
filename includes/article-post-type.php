@@ -493,4 +493,3 @@ function sort_articles_by_meeting_date($query) {
 }
 }
 add_action('pre_get_posts', 'sort_articles_by_meeting_date');
-
