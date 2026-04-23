@@ -15,27 +15,30 @@ require_once get_template_directory() . '/includes/block-styles.php';
 // Include block bindings
 require_once get_template_directory() . '/includes/block-bindings.php';
 
+// Instant search: article hit template, Typesense params, longer snippet fallback.
+require_once get_template_directory() . '/includes/typesense-instant-search-ui.php';
+
 /**
  * Expose the article post type to CM Typesense index type configuration.
  *
  * @param array $available_post_types Post type configs keyed by slug (label/value pairs).
  * @return array
  */
-if ( ! function_exists( 'cm_typesense_add_available_post_types' ) ) {
-    function cm_typesense_add_available_post_types( $available_post_types ) {
-        $available_post_types['article'] = array(
-            'label' => 'Article',
-            'value' => 'article',
-        );
-
-        return $available_post_types;
-    }
-}
-add_filter( 'cm_typesense_available_index_types', 'cm_typesense_add_available_post_types' );
+add_filter( 'cm_typesense_available_index_types', function( $available_post_types ) {
+    $available_post_types['article'] = [
+        'label' => 'Articles',
+        'value' => 'article' // Must match your CPT slug exactly
+    ];
+    return $available_post_types;
+});
 
 /**
  * Use Search Configuration "enabled post types" for the hijacked instant-search popup.
  *
+ * 
+ * curl -H "X-TYPESENSE-API-KEY: ec5e0cbdfd8a063d1ae421a43b1785457fe43a8c6cec4f84e8c5211047544100" http://localhost:8108/health
+ * 
+ * 
  * The popup is built from the Customizer option typesense_customizer_instant_search; if that
  * value is missing or never published, Codemanas Search with Typesense falls back to post
  * only (see Frontend::load_popup). Autocomplete already follows enabled_post_types — this
@@ -62,6 +65,65 @@ if ( ! function_exists( 'cm_typesense_sync_popup_enabled_post_types' ) ) {
 	}
 }
 add_filter( 'cm_typesense_popup_shortcode_params', 'cm_typesense_sync_popup_enabled_post_types', 5 );
+
+/**
+ * Add article meeting date custom meta field to Typesense schema.
+ *
+ * @param array  $schema Collection schema.
+ * @param string $schema_name Collection/schema key (post type).
+ * @return array
+ */
+if ( ! function_exists( 'cm_typesense_add_article_meeting_date_schema_field' ) ) {
+    function cm_typesense_add_article_meeting_date_schema_field( $schema, $schema_name ) {
+        if ( $schema_name !== 'article' || empty( $schema['fields'] ) || ! is_array( $schema['fields'] ) ) {
+            return $schema;
+        }
+
+        foreach ( $schema['fields'] as $field ) {
+            if ( ! empty( $field['name'] ) && $field['name'] === '_article_meeting_date' ) {
+                return $schema;
+            }
+        }
+
+        $schema['fields'][] = array(
+            'name'     => '_article_meeting_date',
+            'type'     => 'string',
+            'optional' => true,
+        );
+
+        return $schema;
+    }
+}
+add_filter( 'cm_typesense_schema', 'cm_typesense_add_article_meeting_date_schema_field', 10, 2 );
+
+/**
+ * Populate article meeting date in Typesense indexed document.
+ *
+ * @param array        $formatted_data Typesense document payload.
+ * @param WP_Post|mixed $raw_data      Raw object data provided by plugin.
+ * @param int          $object_id      Post ID or term ID.
+ * @param string       $schema_name    Collection/schema key (post type).
+ * @return array
+ */
+if ( ! function_exists( 'cm_typesense_add_article_meeting_date_data' ) ) {
+    function cm_typesense_add_article_meeting_date_data( $formatted_data, $raw_data, $object_id, $schema_name ) {
+        if ( $schema_name !== 'article' ) {
+            return $formatted_data;
+        }
+
+        $post_id = (int) $object_id;
+        if ( $post_id <= 0 && $raw_data instanceof WP_Post ) {
+            $post_id = (int) $raw_data->ID;
+        }
+
+        $meeting = $post_id > 0 ? (string) get_post_meta( $post_id, '_article_meeting_date', true ) : '';
+
+        $formatted_data['_article_meeting_date'] = $meeting;
+
+        return $formatted_data;
+    }
+}
+add_filter( 'cm_typesense_data_before_entry', 'cm_typesense_add_article_meeting_date_data', 10, 4 );
 
 /**
  * Enqueue Gutenberg editor scripts for custom meta panels
