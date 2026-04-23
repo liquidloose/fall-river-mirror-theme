@@ -61,7 +61,34 @@ if ( ! defined( 'FR_MIRROR_TYPESENSE_SNIPPET_THRESHOLD' ) ) {
  * when the field is in snippet mode (typical for long post_content). Main knob for “how big the excerpt feels”.
  */
 if ( ! defined( 'FR_MIRROR_TYPESENSE_HIGHLIGHT_AFFIX_TOKENS' ) ) {
-	define( 'FR_MIRROR_TYPESENSE_HIGHLIGHT_AFFIX_TOKENS', 200 );
+	define( 'FR_MIRROR_TYPESENSE_HIGHLIGHT_AFFIX_TOKENS', 24 );
+}
+
+/**
+ * Hit thumbnail box in the hijacked instant-search **popup** (`.cmswt-InstantSearchPopup`), in CSS pixels (square).
+ * Display-only; reindex is not required. For a different WP image size in the index, filter `cm_typesense_html_image_size`.
+ */
+if ( ! defined( 'FR_MIRROR_TYPESENSE_MODAL_THUMB_PX' ) ) {
+	define( 'FR_MIRROR_TYPESENSE_MODAL_THUMB_PX', 420 );
+}
+
+/**
+ * When true: instant search sorts the article index by `_article_meeting_date` (SortBy + patched bundle).
+ * Leave false until Typesense has that field on the **article** collection (recreate/update schema from WP, then reindex).
+ * Defining this in wp-config.php before ABSPATH loads the theme is fine; otherwise define in functions.php before
+ * `require_once … typesense-instant-search-ui.php`.
+ */
+if ( ! defined( 'FR_MIRROR_TYPESENSE_ARTICLE_MEETING_DATE_SORT' ) ) {
+	define( 'FR_MIRROR_TYPESENSE_ARTICLE_MEETING_DATE_SORT', false );
+}
+
+/**
+ * Hijacked instant-search popup only: when not `'yes'`, forces `sticky_first` off so hits reorder by relevance per query.
+ * Customizer "sticky first" maps to global `sort_by=is_sticky:desc,_text_match:desc`, which pins the same sticky posts
+ * on top for every search (often looks like "the same results"). Define as `'yes'` in wp-config.php to restore sticky behavior.
+ */
+if ( ! defined( 'FR_MIRROR_TYPESENSE_POPUP_STICKY_FIRST' ) ) {
+	define( 'FR_MIRROR_TYPESENSE_POPUP_STICKY_FIRST', 'no' );
 }
 
 /**
@@ -74,15 +101,34 @@ function fr_mirror_typesense_additional_search_params( $params ) {
 	if ( ! is_array( $params ) ) {
 		$params = array();
 	}
-	$params['highlight_affix_num_tokens'] = (int) FR_MIRROR_TYPESENSE_HIGHLIGHT_AFFIX_TOKENS;
-	$params['snippet_threshold']          = (int) FR_MIRROR_TYPESENSE_SNIPPET_THRESHOLD;
+	// Typesense expects modest affix counts; very large values hurt snippets and can flatten perceived relevance.
+	$params['highlight_affix_num_tokens'] = min( 64, max( 4, (int) FR_MIRROR_TYPESENSE_HIGHLIGHT_AFFIX_TOKENS ) );
+	$params['snippet_threshold']          = min( 100000, max( 30, (int) FR_MIRROR_TYPESENSE_SNIPPET_THRESHOLD ) );
 
 	return $params;
 }
 add_filter( 'cm_typesense_additional_search_params', 'fr_mirror_typesense_additional_search_params', 10, 1 );
 
 /**
- * When instant search is article-only, include meeting date in query_by for relevance + highlighting.
+ * @param array $options Popup shortcode / Customizer-derived options.
+ * @return array
+ */
+function fr_mirror_typesense_popup_respect_sticky_choice( $options ) {
+	if ( ! is_array( $options ) ) {
+		return $options;
+	}
+	if ( 'yes' === FR_MIRROR_TYPESENSE_POPUP_STICKY_FIRST ) {
+		return $options;
+	}
+	$options['sticky_first'] = 'no';
+
+	return $options;
+}
+add_filter( 'cm_typesense_popup_shortcode_params', 'fr_mirror_typesense_popup_respect_sticky_choice', 25 );
+
+/**
+ * When instant search is article-only and meeting meta is on the Typesense schema, include it in query_by.
+ * Gated with {@see FR_MIRROR_TYPESENSE_ARTICLE_MEETING_DATE_SORT} (same as sort).
  *
  * @param array $out   Parsed shortcode attributes.
  * @param array $pairs Default pairs (unused).
@@ -98,7 +144,7 @@ function fr_mirror_typesense_shortcode_query_by_article_only( $out, $pairs, $att
 	}
 	$list = array_map( 'sanitize_key', $list );
 
-	if ( count( $list ) === 1 && $list[0] === 'article' ) {
+	if ( FR_MIRROR_TYPESENSE_ARTICLE_MEETING_DATE_SORT && count( $list ) === 1 && $list[0] === 'article' ) {
 		$out['query_by'] = 'post_title,post_content,_article_meeting_date';
 	}
 
@@ -107,13 +153,42 @@ function fr_mirror_typesense_shortcode_query_by_article_only( $out, $pairs, $att
 add_filter( 'shortcode_atts_cm_typesense_search', 'fr_mirror_typesense_shortcode_query_by_article_only', 10, 3 );
 
 /**
+ * Instant search sort dropdown for the article index: by meeting date (not post_date).
+ * Only registered when {@see FR_MIRROR_TYPESENSE_ARTICLE_MEETING_DATE_SORT} is true.
+ *
+ * @param array  $items     Default Recent / Oldest items from the plugin.
+ * @param string $post_type Schema slug in the current loop (e.g. article).
+ * @return array
+ */
+function fr_mirror_typesense_article_sortby_meeting_date( $items, $post_type ) {
+	if ( 'article' !== $post_type || ! class_exists( '\Codemanas\Typesense\Main\TypesenseAPI' ) ) {
+		return $items;
+	}
+	$coll = \Codemanas\Typesense\Main\TypesenseAPI::getInstance()->getCollectionNameFromSchema( 'article' );
+
+	return array(
+		array(
+			'label' => __( 'Meeting date (newest)', 'the-fall-river-mirror-clone' ),
+			'value' => $coll . '/sort/_article_meeting_date:desc',
+		),
+		array(
+			'label' => __( 'Meeting date (oldest)', 'the-fall-river-mirror-clone' ),
+			'value' => $coll . '/sort/_article_meeting_date:asc',
+		),
+	);
+}
+if ( FR_MIRROR_TYPESENSE_ARTICLE_MEETING_DATE_SORT ) {
+	add_filter( 'cm_typesense_search_sortby_items', 'fr_mirror_typesense_article_sortby_meeting_date', 10, 2 );
+}
+
+/**
  * Build (if needed) a patched instant-search bundle and return its public URL + cache-bust version.
  *
- * The plugin enqueues this script from wp_footer (hijacked search popup), so mutating it on
- * wp_print_scripts is too early — wp_script_is( 'enqueued' ) is still false. We instead rewrite
- * the src when WordPress resolves it (script_loader_src), which runs during footer script output.
- *
- * The vendor bundle truncates post_content to 100 chars when there is no highlight mark; we replace that constant.
+ * Patches:
+ * 1) Longer post_content fallback when Typesense has no highlight fragment (substring).
+ * 2) Optional: if {@see FR_MIRROR_TYPESENSE_ARTICLE_MEETING_DATE_SORT} is true, inject
+ *    `collectionSpecificSearchParameters` so article searches default-sort by `_article_meeting_date`
+ *    (requires that field on the live Typesense article collection).
  *
  * @return array{url:string,ver:int}|null
  */
@@ -136,15 +211,20 @@ function fr_mirror_typesense_get_patched_instant_search_bundle() {
 		return null;
 	}
 
-	$dir  = trailingslashit( $upload['basedir'] ) . 'fr-mirror-typesense-cache';
-	$key  = md5_file( $plugin_js ) . '-' . (int) FR_MIRROR_TYPESENSE_SNIPPET_FALLBACK_CHARS;
+	$dir = trailingslashit( $upload['basedir'] ) . 'fr-mirror-typesense-cache';
+	$meet = FR_MIRROR_TYPESENSE_ARTICLE_MEETING_DATE_SORT;
+	$key  = md5_file( $plugin_js ) . '-' . (int) FR_MIRROR_TYPESENSE_SNIPPET_FALLBACK_CHARS . '-' . ( $meet ? 'meet1' : 'meet0' );
 	$file = trailingslashit( $dir ) . 'instant-search-' . $key . '.js';
 
 	$need_rebuild = ! is_readable( $file ) || filemtime( $file ) < filemtime( $plugin_js );
 	if ( ! $need_rebuild && is_readable( $file ) ) {
 		$existing = file_get_contents( $file );
-		$needle    = 'substring(0,' . (int) FR_MIRROR_TYPESENSE_SNIPPET_FALLBACK_CHARS . ')';
-		if ( false === $existing || strpos( $existing, $needle ) === false ) {
+		$n_sub    = 'substring(0,' . (int) FR_MIRROR_TYPESENSE_SNIPPET_FALLBACK_CHARS . ')';
+		if ( false === $existing || strpos( $existing, $n_sub ) === false ) {
+			$need_rebuild = true;
+		} elseif ( $meet && strpos( $existing, 'collectionSpecificSearchParameters' ) === false ) {
+			$need_rebuild = true;
+		} elseif ( ! $meet && strpos( $existing, '_article_meeting_date:desc' ) !== false ) {
 			$need_rebuild = true;
 		}
 	}
@@ -160,10 +240,36 @@ function fr_mirror_typesense_get_patched_instant_search_bundle() {
 		}
 		$patched = str_replace( 'substring(0,100)', 'substring(0,' . (int) FR_MIRROR_TYPESENSE_SNIPPET_FALLBACK_CHARS . ')', $src );
 		if ( $patched === $src ) {
-			// Plugin bundle changed; do not cache a false success.
 			$memo = false;
 			return null;
 		}
+
+		if ( $meet ) {
+			$article_collection = 'article';
+			if ( class_exists( '\Codemanas\Typesense\Main\TypesenseAPI' ) ) {
+				$article_collection = \Codemanas\Typesense\Main\TypesenseAPI::getInstance()->getCollectionNameFromSchema( 'article' );
+			}
+			$cSpec_json = wp_json_encode(
+				array(
+					$article_collection => array(
+						'sort_by' => '_article_meeting_date:desc',
+					),
+				),
+				JSON_UNESCAPED_SLASHES
+			);
+			$adapter_find = ',cacheSearchResultsForSeconds:120,additionalSearchParameters:O}).searchClient';
+			$adapter_repl = ',cacheSearchResultsForSeconds:120,additionalSearchParameters:O,collectionSpecificSearchParameters:' . $cSpec_json . '}).searchClient';
+			$patched2     = str_replace( $adapter_find, $adapter_repl, $patched );
+			if ( $patched2 === $patched ) {
+				if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+					trigger_error( 'Fall River Mirror: instant-search.js bundle changed; meeting-date sort patch needle not found.', E_USER_WARNING );
+				}
+				$memo = false;
+				return null;
+			}
+			$patched = $patched2;
+		}
+
 		if ( false === file_put_contents( $file, $patched ) ) {
 			$memo = false;
 			return null;
@@ -208,6 +314,8 @@ function fr_mirror_typesense_instant_search_hit_styles() {
 	if ( ! wp_script_is( 'cm-typesense-instant-search', 'enqueued' ) ) {
 		return;
 	}
+	$thumb_px = max( 40, min( 320, (int) FR_MIRROR_TYPESENSE_MODAL_THUMB_PX ) );
+
 	wp_register_style( 'fr-mirror-typesense-hit-meta', false, array(), wp_get_theme()->get( 'Version' ) );
 	wp_enqueue_style( 'fr-mirror-typesense-hit-meta' );
 	wp_add_inline_style(
@@ -215,6 +323,9 @@ function fr_mirror_typesense_instant_search_hit_styles() {
 		'.hit-meeting-date{font-size:0.9em;opacity:0.85;margin:0.35em 0 0.25em;}'
 		. '.cmswt-InstantSearchPopup .hit-description,.cmswt-InstantSearch .hit-description{'
 		. 'max-height:none!important;overflow:visible!important;}'
+		. '.cmswt-InstantSearchPopup .hit-header img{'
+		. 'width:' . $thumb_px . 'px!important;height:' . $thumb_px . 'px!important;'
+		. 'object-fit:cover;object-position:center;flex-shrink:0;border-radius:4px;}'
 	);
 }
 add_action( 'wp_footer', 'fr_mirror_typesense_instant_search_hit_styles', 15 );

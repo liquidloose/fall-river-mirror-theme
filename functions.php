@@ -80,7 +80,7 @@ if ( ! function_exists( 'cm_typesense_add_article_meeting_date_schema_field' ) )
         }
 
         foreach ( $schema['fields'] as $field ) {
-            if ( isset( $field['name'] ) && $field['name'] === '_article_meeting_date' ) {
+            if ( ! empty( $field['name'] ) && $field['name'] === '_article_meeting_date' ) {
                 return $schema;
             }
         }
@@ -116,9 +116,9 @@ if ( ! function_exists( 'cm_typesense_add_article_meeting_date_data' ) ) {
             $post_id = (int) $raw_data->ID;
         }
 
-        $formatted_data['_article_meeting_date'] = $post_id > 0
-            ? (string) get_post_meta( $post_id, '_article_meeting_date', true )
-            : '';
+        $meeting = $post_id > 0 ? (string) get_post_meta( $post_id, '_article_meeting_date', true ) : '';
+
+        $formatted_data['_article_meeting_date'] = $meeting;
 
         return $formatted_data;
     }
