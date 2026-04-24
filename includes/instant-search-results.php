@@ -20,9 +20,10 @@ $placeholder = defined( 'CODEMANAS_TYPESENSE_THUMBNAIL_IMAGE_URL' )
 	<div class="hit-header">
 		<# var imageHTML = '';
 		if(data.post_thumbnail_html !== undefined && data.post_thumbnail_html !== ''){
-		imageHTML = data.post_thumbnail_html
+		imageHTML = data.post_thumbnail_html.replace(/src=(["'])http:\/\//gi, 'src=$1https://')
 		}else if(data.post_thumbnail !== undefined && data.post_thumbnail !== ''){
-		imageHTML = `<img src="${data.post_thumbnail}"
+		var thumbUrl = String(data.post_thumbnail).replace(/^http:\/\//i, 'https://');
+		imageHTML = `<img src="${thumbUrl}"
 						  alt="${data.post_title}"
 						  class="ais-Hit-itemImage"
 		/>`
@@ -73,9 +74,10 @@ $placeholder = defined( 'CODEMANAS_TYPESENSE_THUMBNAIL_IMAGE_URL' )
 	<div class="hit-header">
 		<# var imageHTML = '';
 		if(data.post_thumbnail_html !== undefined && data.post_thumbnail_html !== ''){
-		imageHTML = data.post_thumbnail_html
+		imageHTML = data.post_thumbnail_html.replace(/src=(["'])http:\/\//gi, 'src=$1https://')
 		}else if(data.post_thumbnail !== undefined && data.post_thumbnail !== ''){
-		imageHTML = `<img src="${data.post_thumbnail}"
+		var thumbUrl = String(data.post_thumbnail).replace(/^http:\/\//i, 'https://');
+		imageHTML = `<img src="${thumbUrl}"
 						  alt="${data.post_title}"
 						  class="ais-Hit-itemImage"
 		/>`
