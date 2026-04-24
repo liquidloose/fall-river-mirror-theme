@@ -323,9 +323,17 @@ function fr_mirror_typesense_instant_search_hit_styles() {
 		'.hit-meeting-date{font-size:0.9em;opacity:0.85;margin:0.35em 0 0.25em;}'
 		. '.cmswt-InstantSearchPopup .hit-description,.cmswt-InstantSearch .hit-description{'
 		. 'max-height:none!important;overflow:visible!important;}'
-		. '.cmswt-InstantSearchPopup .hit-header img{'
-		. 'width:100%!important;height:' . $thumb_px . 'px!important;'
-		. 'object-fit:cover;object-position:center;flex-shrink:0;border-radius:4px;}'
+		. '.cmswt-InstantSearchPopup .hit-header,.cmswt-InstantSearchPopup .hit-header--link,.cmswt-InstantSearch .hit-header,.cmswt-InstantSearch .hit-header--link{'
+		. 'display:block;width:100%;max-width:100%;box-sizing:border-box;}'
+		. '.cmswt-InstantSearchPopup .hit-header--link{border-radius:4px;}'
+		. '.cmswt-InstantSearchPopup .hit-header picture,.cmswt-InstantSearch .hit-header picture{'
+		. 'display:block;width:100%;max-width:100%;}'
+		. '.cmswt-InstantSearchPopup .hit-header img,.cmswt-InstantSearchPopup .hit-header picture img{'
+		. 'width:100%!important;min-width:0;height:' . $thumb_px . 'px!important;'
+		. 'object-fit:cover;object-position:center;flex-shrink:0;border-radius:0;}'
+		. '.cmswt-InstantSearch .hit-header img,.cmswt-InstantSearch .hit-header picture img{'
+		. 'width:100%!important;min-width:0;height:auto!important;max-width:100%!important;'
+		. 'object-fit:cover;object-position:center;display:block;}'
 	);
 }
 add_action( 'wp_footer', 'fr_mirror_typesense_instant_search_hit_styles', 15 );

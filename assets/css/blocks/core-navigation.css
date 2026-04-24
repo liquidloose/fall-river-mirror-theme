@@ -262,15 +262,6 @@ select.ais-SortBy-select {
     }
 }
 
-/* One <img> per hit; srcset only picks which file loads — style the img (and WP <picture> if present). */
-.cmswt-InstantSearchPopup .hit-header img,
-.cmswt-InstantSearchPopup .hit-header picture img {
-    display: block;
-    max-width: 100% !important;
-    width: 100% !important;
-    height: auto !important;
-}
-
 .cmswt-Results .hit-content {
     margin-top: unset !important;
     padding: 0 !important;
@@ -281,12 +272,33 @@ select.ais-SortBy-select {
     gap: 7px !important;
 }
 
+/* Small / narrow thumbs still span the hit column (picture shrink-wraps otherwise). */
+.cmswt-Results .cm-col-1 .ais-Hits-item .hit-header picture,
+.cmswt-Results .cm-col-1 .ais-InfiniteHits-item .hit-header picture {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+}
+
+.cmswt-Results .cm-col-1 .ais-Hits-item .hit-header img,
+.cmswt-Results .cm-col-1 .ais-InfiniteHits-item .hit-header img,
+.cmswt-Results .cm-col-1 .ais-Hits-item .hit-header picture img,
+.cmswt-Results .cm-col-1 .ais-InfiniteHits-item .hit-header picture img {
+    width: 100% !important;
+    min-width: 0;
+    object-fit: cover;
+    object-position: center;
+}
+
 @media only screen and (min-width: 1500px) {
     .cmswt-InstantSearchPopup--results {
         max-width: 60% !important;
     }
-    
-    .cmswt-Results .cm-col-1 .ais-Hits-item .hit-header img, .cmswt-Results .cm-col-1 .ais-InfiniteHits-item .hit-header img {
+
+    .cmswt-Results .cm-col-1 .ais-Hits-item .hit-header img,
+    .cmswt-Results .cm-col-1 .ais-InfiniteHits-item .hit-header img,
+    .cmswt-Results .cm-col-1 .ais-Hits-item .hit-header picture img,
+    .cmswt-Results .cm-col-1 .ais-InfiniteHits-item .hit-header picture img {
         height: auto;
         max-width: 100% !important;
     }
