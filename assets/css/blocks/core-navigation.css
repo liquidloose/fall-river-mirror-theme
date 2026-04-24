@@ -262,9 +262,13 @@ select.ais-SortBy-select {
     }
 }
 
-.cmswt-InstantSearchPopup .hit-header img {
+/* One <img> per hit; srcset only picks which file loads — style the img (and WP <picture> if present). */
+.cmswt-InstantSearchPopup .hit-header img,
+.cmswt-InstantSearchPopup .hit-header picture img {
+    display: block;
+    max-width: 100% !important;
     width: 100% !important;
-    height: 500px !important;
+    height: auto !important;
 }
 
 .cmswt-Results .hit-content {
@@ -290,6 +294,5 @@ select.ais-SortBy-select {
 
 .hit-meeting-date {
     font-weight: 900;
-    font-size: 1.rem;
+    font-size: 1rem;
 }
-

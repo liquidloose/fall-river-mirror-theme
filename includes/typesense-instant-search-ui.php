@@ -324,7 +324,7 @@ function fr_mirror_typesense_instant_search_hit_styles() {
 		. '.cmswt-InstantSearchPopup .hit-description,.cmswt-InstantSearch .hit-description{'
 		. 'max-height:none!important;overflow:visible!important;}'
 		. '.cmswt-InstantSearchPopup .hit-header img{'
-		. 'width:' . $thumb_px . 'px!important;height:' . $thumb_px . 'px!important;'
+		. 'width:100%!important;height:' . $thumb_px . 'px!important;'
 		. 'object-fit:cover;object-position:center;flex-shrink:0;border-radius:4px;}'
 	);
 }
