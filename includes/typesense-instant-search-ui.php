@@ -79,7 +79,7 @@ if ( ! defined( 'FR_MIRROR_TYPESENSE_MODAL_THUMB_PX' ) ) {
  * `require_once … typesense-instant-search-ui.php`.
  */
 if ( ! defined( 'FR_MIRROR_TYPESENSE_ARTICLE_MEETING_DATE_SORT' ) ) {
-	define( 'FR_MIRROR_TYPESENSE_ARTICLE_MEETING_DATE_SORT', false );
+	define( 'FR_MIRROR_TYPESENSE_ARTICLE_MEETING_DATE_SORT', true );
 }
 
 /**

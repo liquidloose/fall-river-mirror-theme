@@ -79,8 +79,12 @@ if ( ! function_exists( 'cm_typesense_add_article_meeting_date_schema_field' ) )
             return $schema;
         }
 
-        foreach ( $schema['fields'] as $field ) {
+        foreach ( $schema['fields'] as $i => $field ) {
             if ( ! empty( $field['name'] ) && $field['name'] === '_article_meeting_date' ) {
+                // Typesense: string fields are not sortable unless sort=true (see collections schema docs).
+                if ( empty( $field['sort'] ) ) {
+                    $schema['fields'][ $i ]['sort'] = true;
+                }
                 return $schema;
             }
         }
@@ -89,6 +93,7 @@ if ( ! function_exists( 'cm_typesense_add_article_meeting_date_schema_field' ) )
             'name'     => '_article_meeting_date',
             'type'     => 'string',
             'optional' => true,
+            'sort'     => true,
         );
 
         return $schema;
@@ -115,7 +120,6 @@ if ( ! function_exists( 'cm_typesense_add_article_meeting_date_data' ) ) {
         if ( $post_id <= 0 && $raw_data instanceof WP_Post ) {
             $post_id = (int) $raw_data->ID;
         }
-
         $meeting = $post_id > 0 ? (string) get_post_meta( $post_id, '_article_meeting_date', true ) : '';
 
         $formatted_data['_article_meeting_date'] = $meeting;
