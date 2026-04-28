@@ -99,6 +99,48 @@ In `functions.php`, the theme:
 
 If Typesense plugin classes are unavailable, these filters safely no-op.
 
+## Hook Profiler (FRM)
+
+The FRM hook profiler now lives in:
+
+- `includes/frm-hook-profiler.php`
+
+It is included from:
+
+- `functions.php` via `require_once get_template_directory() . '/includes/frm-hook-profiler.php';`
+
+### What it does
+
+- Logs JSONL rows to `wp-content/uploads/frm-hook-profile.log`
+- Supports explicit callback wrapping via `frm_profile_callable(...)`
+- Can wrap all callbacks on selected hooks (plugin/theme/core attribution)
+- Adds per-row `source` and `source_file` metadata for callback provenance
+
+### Feature toggles
+
+Defined in `includes/frm-hook-profiler.php`:
+
+- `FRM_HOOK_PROFILER` - Master on/off switch for profiler logging
+- `FRM_HOOK_PROFILER_WRAP_ALL_CALLBACKS` - Enables wrapping all callbacks on targeted hooks
+
+To disable profiling in local/dev quickly, set:
+
+```php
+define( 'FRM_HOOK_PROFILER', false );
+```
+
+To keep explicit wrappers but disable broad hook wrapping, set:
+
+```php
+define( 'FRM_HOOK_PROFILER_WRAP_ALL_CALLBACKS', false );
+```
+
+### Operational notes
+
+- This is diagnostics tooling; avoid leaving full logging enabled long-term on busy environments.
+- Wrapping happens late on `wp_loaded` so most plugin/theme callbacks are already registered.
+- If profiling is no longer needed, disable via constants and rotate/remove the log file.
+
 ## Frontend Behavior
 
 Key runtime behavior in `functions.php`:
