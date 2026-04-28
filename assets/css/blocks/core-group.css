@@ -150,3 +150,7 @@ span.wp-block-navigation-item__label:hover {
 .wp-block-search__inside-wrapper {
     height: 55px;
 }
+
+.cmswt-CollectionMenu-current {
+    display: none !important;
+}
