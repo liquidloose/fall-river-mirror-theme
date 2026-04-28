@@ -328,3 +328,8 @@ select.ais-SortBy-select {
 .archive.category .wp-block-group.is-nowrap.is-layout-flex.wp-block-group-is-layout-flex {
     padding-left: 30px;
 }
+
+.cmswt-InstantSearchPopup--results {
+    width: 100%;
+    max-width: 1000px !important;
+}
