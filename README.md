@@ -62,6 +62,7 @@ Defined in `includes/article-api-endpoint.php` under namespace `fr-mirror/v2`:
 - `POST /wp-json/fr-mirror/v2/create-article`
 - `GET /wp-json/fr-mirror/v2/article-youtube-ids`
 - `POST /wp-json/fr-mirror/v2/update-article`
+- `POST /wp-json/fr-mirror/v2/update-article-body` — upsert body + bullets by `youtube_id` (creates draft when missing)
 
 Notes:
 
@@ -150,6 +151,18 @@ Key runtime behavior in `functions.php`:
 - Empty/placeholder YouTube embeds can be populated from `_article_youtube_id`
 - Open Graph tags are injected into `<head>` for social previews
 - AdSense script is injected in `<head>` (client ID currently hardcoded)
+
+### Sticky video player (article singles)
+
+On single `article` pages, when the body contains timestamp links (`<a class="video-jump-link">`) and an in-page YouTube embed:
+
+- Clicking a timestamp opens a fixed bottom-right mini-player at that seek time (YouTube IFrame API).
+- Clicking another timestamp seeks the same player without leaving the page.
+- Close control (white × on black circle) or `Escape` dismisses the player and restores the in-page embed.
+
+Assets: `js/sticky-video-player.js`, `assets/css/sticky-video-player.css` (enqueued only on `is_singular( 'article' )`).
+
+**After a theme import/merge**, preserve those files plus the enqueue block and `fr_mirror_*youtube*` helpers in `functions.php`.
 
 ## Content Migration Helper
 

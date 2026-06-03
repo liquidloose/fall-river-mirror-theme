@@ -662,6 +662,27 @@ function fr_mirror_render_post_id_block($attributes, $content, $block) {
 }
 
 /**
+ * Add data attributes so sticky-video-player.js can find the Council Meeting embed.
+ *
+ * @param string $html       Rendered embed HTML.
+ * @param string $youtube_id YouTube video ID from _article_youtube_id.
+ * @return string
+ */
+function fr_mirror_tag_youtube_embed_for_sticky( $html, $youtube_id ) {
+    if ( empty( $html ) || strpos( $html, 'data-fr-mirror-youtube-embed' ) !== false ) {
+        return $html;
+    }
+    $attrs = sprintf(
+        ' data-fr-mirror-youtube-embed="1" data-youtube-id="%s"',
+        esc_attr( $youtube_id )
+    );
+    if ( preg_match( '#<figure\b#i', $html ) ) {
+        return preg_replace( '#<figure\b#i', '<figure' . $attrs, $html, 1 );
+    }
+    return '<div' . $attrs . ' class="fr-mirror-youtube-embed-anchor">' . $html . '</div>';
+}
+
+/**
  * Filter embed block rendering on frontend to populate YouTube URL from meta
  * 
  * If the embed block is a Council Meeting variation or YouTube embed without URL,
@@ -698,24 +719,24 @@ function fr_mirror_render_council_meeting_embed($block_content, $block) {
         // Not our variation, return original content
         return $block_content;
     }
-    
-    // If content is already rendered and not empty, return it
-    if (!empty(trim($block_content))) {
-        return $block_content;
-    }
-    
+
     // Get post ID from block context or current post
     $post_id = $block['context']['postId'] ?? get_the_ID();
-    
+
     if (!$post_id) {
         return $block_content; // Can't get post ID, return original
     }
-    
-    // Get YouTube ID from meta
+
+    // Get YouTube ID from meta (same source as council-meeting-variation.js in the editor)
     $youtube_id = get_post_meta($post_id, '_article_youtube_id', true);
-    
+
     if (empty($youtube_id)) {
         return $block_content; // No YouTube ID, return original
+    }
+
+    // Already rendered (editor saved a URL via council-meeting variation) — tag for sticky player
+    if (!empty(trim($block_content))) {
+        return fr_mirror_tag_youtube_embed_for_sticky( $block_content, $youtube_id );
     }
     
     // Set processing flag to prevent recursion
@@ -733,28 +754,98 @@ function fr_mirror_render_council_meeting_embed($block_content, $block) {
     // Reset processing flag
     $processing = false;
     
+    $embed_attrs = sprintf(
+        ' data-fr-mirror-youtube-embed="1" data-youtube-id="%s"',
+        esc_attr( $youtube_id )
+    );
+
     // If wp_oembed_get failed, manually create the embed
-    if (empty($embed_html)) {
-        $embed_url = 'https://www.youtube.com/embed/' . esc_attr($youtube_id);
+    if ( empty( $embed_html ) ) {
+        $embed_url = fr_mirror_youtube_embed_url_with_api(
+            'https://www.youtube.com/embed/' . esc_attr( $youtube_id )
+        );
         $embed_html = sprintf(
-            '<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-16-9 wp-has-aspect-ratio">
+            '<figure%s class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-16-9 wp-has-aspect-ratio">
                 <div class="wp-block-embed__wrapper">
                     <iframe loading="lazy" title="%s" width="640" height="360" src="%s" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
                 </div>
             </figure>',
-            esc_attr(sprintf(__('Embedded video: %s', 'the-fall-river-mirror-clone'), $youtube_id)),
-            esc_url($embed_url)
+            $embed_attrs,
+            esc_attr( sprintf( __( 'Embedded video: %s', 'the-fall-river-mirror-clone' ), $youtube_id ) ),
+            esc_url( $embed_url )
         );
     } else {
         // Wrap oembed output in the standard embed block structure
-        $embed_html = '<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-16-9 wp-has-aspect-ratio">
+        $embed_html = fr_mirror_add_youtube_api_params_to_iframe_html( $embed_html );
+        $embed_html = '<figure' . $embed_attrs . ' class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-16-9 wp-has-aspect-ratio">
             <div class="wp-block-embed__wrapper">' . $embed_html . '</div>
         </figure>';
     }
-    
+
     return $embed_html;
 }
 add_filter('render_block', 'fr_mirror_render_council_meeting_embed', 10, 2);
+
+/**
+ * Append YouTube IFrame API query params for embed URLs.
+ *
+ * @param string $embed_url YouTube /embed/ URL.
+ * @return string
+ */
+function fr_mirror_youtube_embed_url_with_api( $embed_url ) {
+    if ( strpos( $embed_url, 'enablejsapi=' ) !== false ) {
+        return $embed_url;
+    }
+    return add_query_arg(
+        array(
+            'enablejsapi' => '1',
+            'origin'      => home_url(),
+        ),
+        $embed_url
+    );
+}
+
+/**
+ * Add enablejsapi and origin to YouTube iframe src attributes in HTML.
+ *
+ * @param string $html Embed or block HTML.
+ * @return string
+ */
+function fr_mirror_add_youtube_api_params_to_iframe_html( $html ) {
+    if ( empty( $html ) || strpos( $html, 'youtube.com/embed' ) === false ) {
+        return $html;
+    }
+    return preg_replace_callback(
+        '#src="([^"]*youtube\.com/embed/[^"]*)"#i',
+        function ( $matches ) {
+            return 'src="' . esc_url( fr_mirror_youtube_embed_url_with_api( $matches[1] ) ) . '"';
+        },
+        $html
+    );
+}
+
+/**
+ * Ensure YouTube embed blocks on articles expose IFrame API params.
+ *
+ * @param string $block_content Rendered block HTML.
+ * @param array  $block         Block data.
+ * @return string
+ */
+function fr_mirror_article_youtube_embed_api_params( $block_content, $block ) {
+    if ( ! is_singular( 'article' ) ) {
+        return $block_content;
+    }
+    if ( ! isset( $block['blockName'] ) || $block['blockName'] !== 'core/embed' ) {
+        return $block_content;
+    }
+    $attrs = $block['attrs'] ?? array();
+    $slug  = $attrs['providerNameSlug'] ?? '';
+    if ( $slug !== 'youtube' && strpos( $block_content, 'youtube.com/embed' ) === false ) {
+        return $block_content;
+    }
+    return fr_mirror_add_youtube_api_params_to_iframe_html( $block_content );
+}
+add_filter( 'render_block', 'fr_mirror_article_youtube_embed_api_params', 20, 2 );
 
 /**
  * Enqueue frontend scripts
@@ -767,8 +858,51 @@ function the_fall_river_mirror_clone_enqueue_frontend_assets() {
 		wp_get_theme()->get('Version'),
 		true
 	);
+
+	if ( is_singular( 'article' ) ) {
+		$css_path = get_template_directory() . '/assets/css/sticky-video-player.css';
+		$js_path  = get_template_directory() . '/js/sticky-video-player.js';
+		$css_ver  = file_exists( $css_path ) ? (string) filemtime( $css_path ) : wp_get_theme()->get( 'Version' );
+		$js_ver   = file_exists( $js_path ) ? (string) filemtime( $js_path ) : wp_get_theme()->get( 'Version' );
+
+		wp_enqueue_style(
+			'fr-mirror-sticky-video-player',
+			get_template_directory_uri() . '/assets/css/sticky-video-player.css',
+			array(),
+			$css_ver
+		);
+		wp_enqueue_script(
+			'fr-mirror-sticky-video-player',
+			get_template_directory_uri() . '/js/sticky-video-player.js',
+			array(),
+			$js_ver,
+			true
+		);
+
+		$youtube_id = get_post_meta( get_the_ID(), '_article_youtube_id', true );
+		wp_localize_script(
+			'fr-mirror-sticky-video-player',
+			'frMirrorStickyVideo',
+			array(
+				'youtubeId' => is_string( $youtube_id ) ? sanitize_text_field( $youtube_id ) : '',
+			)
+		);
+	}
 }
 add_action( 'wp_enqueue_scripts', 'the_fall_river_mirror_clone_enqueue_frontend_assets' );
+
+/**
+ * Keep sticky player script out of SiteGround's combined/minified bundle (stale cache risk).
+ *
+ * @param array $handles Script handles to exclude from combine.
+ * @return array
+ */
+function fr_mirror_exclude_sticky_video_from_sgo_combine( $handles ) {
+	$handles[] = 'fr-mirror-sticky-video-player';
+	return $handles;
+}
+add_filter( 'sgo_javascript_combine_exclude', 'fr_mirror_exclude_sticky_video_from_sgo_combine' );
+add_filter( 'sgo_js_minify_exclude', 'fr_mirror_exclude_sticky_video_from_sgo_combine' );
 
 /**
  * Add Google AdSense script to site head
@@ -869,3 +1003,4 @@ function add_the_fall_river_mirror_clone_og_setup() {
     }
 }
 add_action('wp_head', 'add_the_fall_river_mirror_clone_og_setup', 5);
+

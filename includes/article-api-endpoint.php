@@ -304,6 +304,47 @@ add_action( 'rest_api_init', function () {
     ),
   ) );
 
+  /**
+   * Upsert article body + bullet points by youtube_id (FastAPI regenerate sync).
+   * POST /wp-json/fr-mirror/v2/update-article-body
+   * Updates an existing post, or creates a draft when none exists (requires featured_image).
+   */
+  register_rest_route( 'fr-mirror/v2', '/update-article-body', array(
+    'methods'             => 'POST',
+    'callback'            => 'update_article_body_callback',
+    'permission_callback' => 'fr_mirror_require_jwt',
+    'args'                => array(
+      'youtube_id' => array(
+        'required' => false,
+        'type'     => 'string',
+      ),
+      'title' => array(
+        'required' => false,
+        'type'     => 'string',
+      ),
+      'content' => array(
+        'required' => false,
+        'type'     => 'string',
+      ),
+      'bullet_points' => array(
+        'required' => false,
+        'type'     => 'string',
+      ),
+      'meeting_date' => array(
+        'required' => false,
+        'type'     => 'string',
+      ),
+      'committee' => array(
+        'required' => false,
+        'type'     => 'string',
+      ),
+      'featured_image' => array(
+        'required' => false,
+        'type'     => 'string',
+      ),
+    ),
+  ) );
+
 } );
 
 /**
@@ -429,6 +470,187 @@ function fr_mirror_set_post_featured_image_from_param( $post_id, $featured_image
   }
 
   return new WP_Error( 'invalid_featured_image', 'featured_image must be a base64 data URL or a valid image URL.', array( 'status' => 400 ) );
+}
+
+/**
+ * Assign committee name as a WordPress category on an article post.
+ *
+ * @param int    $post_id   Article post ID.
+ * @param string $committee Committee display name.
+ */
+function fr_mirror_assign_committee_category( $post_id, $committee ) {
+  $sanitized_committee = sanitize_text_field( $committee );
+  if ( $sanitized_committee === '' ) {
+    return;
+  }
+
+  update_post_meta( $post_id, '_article_committee', $sanitized_committee );
+
+  $category = get_term_by( 'name', $sanitized_committee, 'category' );
+  if ( ! $category ) {
+    $category_result = wp_insert_term( $sanitized_committee, 'category' );
+    if ( is_wp_error( $category_result ) ) {
+      error_log( 'Failed to create committee category: ' . $category_result->get_error_message() );
+      return;
+    }
+    $category_id = isset( $category_result['term_id'] ) ? $category_result['term_id'] : $category_result;
+    wp_set_post_categories( $post_id, array( $category_id ), false );
+    return;
+  }
+
+  wp_set_post_categories( $post_id, array( $category->term_id ), false );
+}
+
+/**
+ * Find an article post ID by YouTube ID meta.
+ *
+ * @param string $youtube_id YouTube video ID.
+ * @return int Post ID, or 0 when not found.
+ */
+function fr_mirror_find_article_post_id_by_youtube_id( $youtube_id ) {
+  $posts = get_posts( array(
+    'post_type'      => 'article',
+    'post_status'    => 'any',
+    'posts_per_page' => 1,
+    'meta_query'     => array(
+      array(
+        'key'     => '_article_youtube_id',
+        'value'   => $youtube_id,
+        'compare' => '=',
+      ),
+    ),
+    'fields' => 'ids',
+  ) );
+
+  if ( empty( $posts ) ) {
+    return 0;
+  }
+
+  return (int) $posts[0];
+}
+
+/**
+ * Upsert article body and bullet points by youtube_id.
+ * POST /wp-json/fr-mirror/v2/update-article-body
+ *
+ * @param WP_REST_Request $request The request object.
+ * @return WP_REST_Response|WP_Error
+ */
+function update_article_body_callback( WP_REST_Request $request ) {
+  $params = $request->get_json_params();
+  if ( empty( $params ) ) {
+    $params = $request->get_body_params();
+  }
+
+  $youtube_id     = isset( $params['youtube_id'] ) ? trim( sanitize_text_field( $params['youtube_id'] ) ) : '';
+  $title          = isset( $params['title'] ) ? $params['title'] : '';
+  $content        = isset( $params['content'] ) ? $params['content'] : '';
+  $bullet_points  = isset( $params['bullet_points'] ) ? $params['bullet_points'] : '';
+  $meeting_date   = isset( $params['meeting_date'] ) ? $params['meeting_date'] : '';
+  $committee      = isset( $params['committee'] ) ? $params['committee'] : '';
+  $featured_image = isset( $params['featured_image'] ) ? $params['featured_image'] : '';
+
+  if ( $youtube_id === '' ) {
+    return new WP_Error( 'validation_error', 'youtube_id is required.', array( 'status' => 400 ) );
+  }
+
+  $post_id = fr_mirror_find_article_post_id_by_youtube_id( $youtube_id );
+
+  if ( $post_id > 0 ) {
+    if ( $title === '' && $content === '' && $bullet_points === '' ) {
+      return new WP_Error(
+        'validation_error',
+        'At least one of title, content, or bullet_points is required.',
+        array( 'status' => 400 )
+      );
+    }
+
+    $update_data = array( 'ID' => $post_id );
+    if ( $title !== '' ) {
+      $update_data['post_title'] = $title;
+    }
+    if ( $content !== '' ) {
+      $update_data['post_content'] = fr_mirror_get_required_article_blocks( '', $content );
+      update_post_meta( $post_id, '_article_content', wp_kses_post( $content ) );
+    }
+
+    if ( count( $update_data ) > 1 ) {
+      $updated = wp_update_post( $update_data, true );
+      if ( is_wp_error( $updated ) ) {
+        return $updated;
+      }
+    }
+
+    if ( $bullet_points !== '' ) {
+      update_post_meta( $post_id, '_article_bullet_points', wp_kses_post( $bullet_points ) );
+    }
+
+    return rest_ensure_response( array(
+      'success' => true,
+      'post_id' => $post_id,
+      'updated' => $post_id,
+      'created' => false,
+    ) );
+  }
+
+  if ( $title === '' ) {
+    return new WP_Error( 'validation_error', 'title is required to create an article.', array( 'status' => 400 ) );
+  }
+  if ( $content === '' ) {
+    return new WP_Error( 'validation_error', 'content is required to create an article.', array( 'status' => 400 ) );
+  }
+  if ( $featured_image === '' || $featured_image === null ) {
+    return new WP_Error(
+      'validation_error',
+      'featured_image is required to create an article on WordPress.',
+      array( 'status' => 400 )
+    );
+  }
+
+  $post_data = array(
+    'post_title'   => $title,
+    'post_content' => fr_mirror_get_required_article_blocks( '', $content ),
+    'post_type'    => 'article',
+    'post_status'  => 'draft',
+    'post_author'  => get_current_user_id(),
+  );
+
+  $post_id = wp_insert_post( $post_data, true );
+  if ( is_wp_error( $post_id ) ) {
+    return $post_id;
+  }
+
+  update_post_meta( $post_id, '_article_youtube_id', $youtube_id );
+  update_post_meta( $post_id, '_article_content', wp_kses_post( $content ) );
+
+  if ( $bullet_points !== '' ) {
+    update_post_meta( $post_id, '_article_bullet_points', wp_kses_post( $bullet_points ) );
+  }
+  if ( $meeting_date !== '' ) {
+    update_post_meta( $post_id, '_article_meeting_date', sanitize_text_field( $meeting_date ) );
+  }
+  if ( $committee !== '' ) {
+    fr_mirror_assign_committee_category( $post_id, $committee );
+  }
+
+  $featured_result = fr_mirror_set_post_featured_image_from_param( $post_id, $featured_image, false );
+  if ( is_wp_error( $featured_result ) ) {
+    return $featured_result;
+  }
+
+  return new WP_REST_Response(
+    array(
+      'success' => true,
+      'post_id' => $post_id,
+      'created' => true,
+      'id'      => $post_id,
+      'title'   => get_the_title( $post_id ),
+      'status'  => get_post_status( $post_id ),
+      'link'    => get_permalink( $post_id ),
+      'message' => 'Article created successfully.',
+    ),
+    201
+  );
 }
 
 /**
