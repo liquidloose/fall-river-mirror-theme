@@ -11,6 +11,7 @@
 	position: fixed !important;
 	z-index: 999999;
 	margin: 0 !important;
+	max-width: none;
 	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
 	border-radius: 4px;
 	overflow: visible;
@@ -20,7 +21,8 @@
 		left 0.35s ease,
 		width 0.35s ease,
 		bottom 0.35s ease,
-		right 0.35s ease;
+		right 0.35s ease,
+		transform 0.35s ease;
 }
 
 .fr-mirror-youtube-embed--sticky .wp-block-embed__wrapper {

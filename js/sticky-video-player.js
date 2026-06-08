@@ -104,6 +104,10 @@
 		if (!embedEl) {
 			return;
 		}
+		// Already portaled to body on a prior stick — keep the original slot.
+		if (embedEl.parentElement === document.body) {
+			return;
+		}
 		if (
 			embedEl.parentElement &&
 			embedEl.parentElement.classList.contains(SLOT_CLASS)
@@ -115,6 +119,31 @@
 		slotEl.className = SLOT_CLASS;
 		embedEl.parentNode.insertBefore(slotEl, embedEl);
 		slotEl.appendChild(embedEl);
+	}
+
+	function portalToBody() {
+		if (!embedEl || embedEl.parentElement === document.body) {
+			return;
+		}
+		document.body.appendChild(embedEl);
+	}
+
+	function restoreToSlot() {
+		if (!slotEl || !embedEl || embedEl.parentElement !== document.body) {
+			return;
+		}
+		if (placeholderEl && placeholderEl.parentElement === slotEl) {
+			slotEl.insertBefore(embedEl, placeholderEl.nextSibling);
+		} else {
+			slotEl.appendChild(embedEl);
+		}
+	}
+
+	function removeCloseButton() {
+		if (closeBtn && closeBtn.parentNode) {
+			closeBtn.parentNode.removeChild(closeBtn);
+		}
+		closeBtn = null;
 	}
 
 	function showPlaceholder(heightPx) {
@@ -169,9 +198,12 @@
 		if (!isSticky) {
 			var rect = embedEl.getBoundingClientRect();
 			showPlaceholder(rect.height);
+			portalToBody();
 			embedEl.style.top = rect.top + 'px';
 			embedEl.style.left = rect.left + 'px';
 			embedEl.style.width = Math.max(rect.width, 280) + 'px';
+			embedEl.style.right = 'auto';
+			embedEl.style.bottom = 'auto';
 			embedEl.classList.add(STICKY_CLASS);
 			ensureCloseButton();
 			isSticky = true;
@@ -193,6 +225,10 @@
 		embedEl.style.top = '';
 		embedEl.style.left = '';
 		embedEl.style.width = '';
+		embedEl.style.right = '';
+		embedEl.style.bottom = '';
+		removeCloseButton();
+		restoreToSlot();
 		hidePlaceholder();
 	}
 
