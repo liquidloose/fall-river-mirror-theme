@@ -100,6 +100,23 @@
 		iframe.src = embedSrc(seconds);
 	}
 
+	function idleEmbedSrc() {
+		var src =
+			'https://www.youtube.com/embed/' +
+			encodeURIComponent(videoId) +
+			'?rel=0&playsinline=1&enablejsapi=1&origin=' +
+			encodeURIComponent(window.location.origin);
+		return src;
+	}
+
+	function stopVideo() {
+		var iframe = getIframe();
+		if (!iframe || !videoId) {
+			return;
+		}
+		iframe.src = idleEmbedSrc();
+	}
+
 	function wrapSlot() {
 		if (!embedEl) {
 			return;
@@ -220,6 +237,7 @@
 		if (!embedEl) {
 			return;
 		}
+		stopVideo();
 		isSticky = false;
 		embedEl.classList.remove(STICKY_CLASS, 'is-settled', 'is-animating');
 		embedEl.style.top = '';
