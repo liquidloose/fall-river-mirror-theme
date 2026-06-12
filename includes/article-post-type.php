@@ -92,41 +92,6 @@ if (!function_exists('register_article_taxonomies')) {
     }
     add_action('init', 'register_article_taxonomies', 20); // Priority 20 ensures post type is registered first
 
-    /**
- * Sort Articles by Meeting Date in Category Archives
- * 
- * This modifies category archive queries to sort by meeting_date meta field
- * instead of the default post_date.
- * 
- * @hook pre_get_posts
- * @param WP_Query $query The WP_Query object
- * @return void
- */
-if (!function_exists('sort_category_archives_by_meeting_date')) {
-    function sort_category_archives_by_meeting_date($query) {
-        // Only run on frontend category archive pages
-        if (is_admin() || !$query->is_main_query()) {
-            return;
-        }
-        
-        // Check if we're on a category archive page and querying articles
-        if (is_category() && (
-            $query->get('post_type') === 'article' ||
-            (is_array($query->get('post_type')) && in_array('article', $query->get('post_type')))
-        )) {
-            
-            // Sort by meeting_date meta field
-            $query->set('meta_key', '_article_meeting_date');
-            $query->set('orderby', 'meta_value'); // Use 'meta_value_num' if dates are stored as timestamps
-            $query->set('order', 'DESC'); // or 'ASC' for oldest first
-            
-            // Optional: Only show posts that have a meeting_date
-            // $query->set('meta_compare', 'EXISTS');
-        }
-    }
-    }
-    add_action('pre_get_posts', 'sort_category_archives_by_meeting_date', 10);
-
 // ============================================================================
 // REST API REGISTRATION
 // ============================================================================
