@@ -741,7 +741,7 @@ function create_article_callback( WP_REST_Request $request ) {
   $title = $request->get_param( 'title' );
   $article_content = $request->get_param( 'article_content' );
   $status_param = $request->get_param( 'status' );
-  $status = !empty($status_param) ? $status_param : 'draft'; // Default to 'draft'
+  $status = !empty($status_param) ? $status_param : 'publish'; // Default to 'draft'
 
   // Basic validation to ensure title and article_content are not empty.
   if ( empty( $title ) ) {
